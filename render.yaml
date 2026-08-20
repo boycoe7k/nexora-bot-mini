@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: shadow-whatsapp-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: OWNER_NUMBER
+        sync: false
+      - key: BOT_NAME
+        value: Shadow Bot
+      - key: PREFIX
+        value: .
+      - key: UNSPLASH_KEY
+        sync: false
+      - key: GIPHY_KEY
+        sync: false
+    healthCheckPath: /
