@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.9",
+    "@whiskeysockets/baileys": "^6.7.23",
     "axios": "^1.6.8",
     "chalk": "^4.1.2",
     "express": "^4.19.2",
