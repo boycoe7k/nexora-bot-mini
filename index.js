@@ -28,6 +28,7 @@ const status = {
   qrCodeAvailable: false,
   botName: null,
   botId: null,
+  browser: "Shadow Bot (Chrome)",
   lastUpdate: new Date().toISOString(),
 };
 
@@ -156,6 +157,7 @@ app.get("/", (req, res) => {
     <div class="card">
       <h2>📡 Connection</h2>
       <span class="badge ${status.connection}">${status.connection}</span>
+      <p class="hint">Browser: <b style="color:#fff">${status.browser}</b></p>
       ${status.connection === "connected" ? `<p class="hint">Linked as: <b style="color:#fff">${status.botName || "Unknown"}</b> (${status.botId || ""})</p>` : ""}
     </div>
 
@@ -301,7 +303,7 @@ async function startBot(qrMode = false) {
     version,
     logger: pino({ level: "silent" }),
     auth: state,
-    browser: ["Ubuntu", "Chrome", "20.0.04"],
+    browser: ["Shadow Bot", "Chrome", "1.0.0"],
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
