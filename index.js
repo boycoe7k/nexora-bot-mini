@@ -159,6 +159,12 @@ app.get("/", (req, res) => {
       <span class="badge ${status.connection}">${status.connection}</span>
       <p class="hint">Browser: <b style="color:#fff">${status.browser}</b></p>
       ${status.connection === "connected" ? `<p class="hint">Linked as: <b style="color:#fff">${status.botName || "Unknown"}</b> (${status.botId || ""})</p>` : ""}
+      <div style="margin-top: 10px; border-top: 1px solid #262640; padding-top: 10px;">
+        <button onclick="if(confirm('This will clear the current session and restart the bot to get a fresh code. Continue?')) location.href='/reset'" 
+                style="background:#e74c3c; color:#fff; border:none; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:0.8rem;">
+          🔄 Reset Session & Get New Code
+        </button>
+      </div>
     </div>
 
     ${status.pairingCode || status.qrCodeAvailable || status.connection === "pairing" ? `
@@ -224,6 +230,20 @@ app.get("/", (req, res) => {
 // Simple JSON endpoint, handy for scripting/uptime pings
 app.get("/status", (req, res) => res.json(status));
 
+// Reset endpoint to clear session and get a new code (useful for "Couldn't link device" errors)
+app.get("/reset", (req, res) => {
+  console.log(chalk.red("Reset requested via web dashboard. Clearing session..."));
+  try {
+    if (fs.existsSync(SESSION_DIR)) {
+      fs.rmSync(SESSION_DIR, { recursive: true, force: true });
+    }
+    res.send("Session cleared. The bot is restarting now... Please wait 10 seconds and refresh the home page.");
+    setTimeout(() => process.exit(0), 1000); // Exit so Render restarts the process
+  } catch (err) {
+    res.status(500).send("Error resetting session: " + err.message);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(chalk.cyan(`Status server listening on port ${PORT}`));
 });
@@ -252,7 +272,7 @@ async function askPhoneNumber() {
   // On a host like Render there's no interactive terminal to type into, so
   // prefer OWNER_NUMBER from the environment. Falls back to the interactive
   // prompt for local/Termux use if OWNER_NUMBER isn't set and a TTY exists.
-  const fromEnv = (process.env.OWNER_NUMBER || "").replace(/[^0-9]/g, "").replace(/^0+/, "");
+  const fromEnv = (process.env.OWNER_NUMBER || "").replace(/[^0-9]/g, "");
   if (fromEnv) {
     console.log(chalk.green("Using OWNER_NUMBER from environment: " + fromEnv));
     return fromEnv;
@@ -271,7 +291,7 @@ async function askPhoneNumber() {
       (answer) => {
         rl.close();
         // Strip everything except digits, remove leading zeros
-        const clean = answer.trim().replace(/[^0-9]/g, "").replace(/^0+/, "");
+        const clean = answer.trim().replace(/[^0-9]/g, "");
         resolve(clean);
       }
     );
@@ -303,7 +323,7 @@ async function startBot(qrMode = false) {
     version,
     logger: pino({ level: "silent" }),
     auth: state,
-    browser: ["Shadow Bot", "Chrome", "1.0.0"],
+    browser: ["Mac OS", "Chrome", "121.0.6167.85"],
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
