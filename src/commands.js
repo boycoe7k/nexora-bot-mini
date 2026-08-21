@@ -21,7 +21,17 @@ const headers = {
 function getMessageText(msg) {
   const m = msg.message;
   if (!m) return "";
-  return m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || "";
+  // Handle regular text, quoted text, and button responses
+  return (
+    m.conversation || 
+    m.extendedTextMessage?.text || 
+    m.imageMessage?.caption || 
+    m.videoMessage?.caption || 
+    m.buttonsResponseMessage?.selectedButtonId || 
+    m.templateButtonReplyMessage?.selectedId ||
+    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    ""
+  );
 }
 
 async function urlToBuffer(url) {
@@ -102,32 +112,34 @@ async function downloadMedia(sock, msg, url, type = "video") {
   }
 }
 
-async function searchYouTube(sock, msg, query) {
+async function searchYouTubeWithButtons(sock, msg, query) {
   try {
-    await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
-    const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
-    if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
-
-    let resultsText = `🎬 *YOUTUBE SEARCH RESULTS*\n\n`;
-    res.data.slice(0, 6).forEach((res, i) => {
-      resultsText += `*${i + 1}.* ${res.title}\n⏱️ *Duration:* ${res.duration}\n🔗 ${res.url}\n\n`;
-    });
-    resultsText += `_Use ${PREFIX}yt <link> to download_`;
-    
-    await reply(sock, msg, resultsText);
-  } catch (err) {
-    await reply(sock, msg, `❌ *Search failed:* ${err.message}`);
-  }
-}
-
-async function searchAndDownload(sock, msg, query, type = "video") {
-  try {
+    const jid = msg.key.remoteJid;
     await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
     const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
     if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
 
     const topResult = res.data[0];
-    await downloadMedia(sock, msg, topResult.url, type);
+    const caption = `🎬 *NEXORA SEARCH RESULT*\n\n` +
+                    `📌 *Title:* ${topResult.title}\n` +
+                    `⏱️ *Duration:* ${topResult.duration}\n` +
+                    `🔗 *URL:* ${topResult.url}\n\n` +
+                    `_Select an option below to download:_`;
+
+    const buttons = [
+      { buttonId: `dl_video|${topResult.url}`, buttonText: { displayText: "🎥 Download Video" }, type: 1 },
+      { buttonId: `dl_audio|${topResult.url}`, buttonText: { displayText: "🎵 Download Audio" }, type: 1 }
+    ];
+
+    const buttonMessage = {
+      image: { url: topResult.thumbnail },
+      caption: caption,
+      footer: `Nexora Bot Mini • ${AUTHOR}`,
+      buttons: buttons,
+      headerType: 4
+    };
+
+    await sock.sendMessage(jid, buttonMessage, { quoted: msg });
   } catch (err) {
     await reply(sock, msg, `❌ *Search failed:* ${err.message}`);
   }
@@ -150,7 +162,7 @@ function buildMenu(pushName) {
 ┗ \`${PREFIX}menu\` - Show menu
 
 📥 *DOWNLOADER (NEXA VDL)*
-┣ \`${PREFIX}yts\` - YouTube Search
+┣ \`${PREFIX}yts\` - Search with Buttons
 ┣ \`${PREFIX}vid\` - Search & Download Video
 ┣ \`${PREFIX}song\` - Search & Download Audio
 ┣ \`${PREFIX}yt\` - YouTube Link Downloader
@@ -180,11 +192,18 @@ async function handleCommand(sock, msg) {
     const jid = msg.key.remoteJid;
     const sender = msg.key.participant || jid;
     const pushName = msg.pushName || "User";
-    const body = getMessageText(msg).trim();
+    const rawText = getMessageText(msg).trim();
 
-    if (!body.startsWith(PREFIX)) return;
+    // ── Handle Button Responses ──
+    if (rawText.startsWith("dl_video|") || rawText.startsWith("dl_audio|")) {
+      const [type, url] = rawText.split("|");
+      await react(sock, msg, "🚀");
+      return downloadMedia(sock, msg, url, type === "dl_video" ? "video" : "audio");
+    }
 
-    const parts = body.slice(PREFIX.length).trim().split(/\s+/);
+    if (!rawText.startsWith(PREFIX)) return;
+
+    const parts = rawText.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = parts.shift().toLowerCase();
     const text = parts.join(" ");
 
@@ -212,7 +231,7 @@ async function handleCommand(sock, msg) {
 
       case "yts":
         if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}yts <query>`);
-        await searchYouTube(sock, msg, text);
+        await searchYouTubeWithButtons(sock, msg, text);
         break;
 
       case "vid":
@@ -221,7 +240,8 @@ async function handleCommand(sock, msg) {
         if (vidUrl) {
           await downloadMedia(sock, msg, vidUrl, "video");
         } else {
-          await searchAndDownload(sock, msg, text, "video");
+          // Default to showing buttons for search result
+          await searchYouTubeWithButtons(sock, msg, text);
         }
         break;
 
@@ -232,7 +252,8 @@ async function handleCommand(sock, msg) {
         if (songUrl) {
           await downloadMedia(sock, msg, songUrl, "audio");
         } else {
-          await searchAndDownload(sock, msg, text, "audio");
+          // Default to showing buttons for search result
+          await searchYouTubeWithButtons(sock, msg, text);
         }
         break;
 
