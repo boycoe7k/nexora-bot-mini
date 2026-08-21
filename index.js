@@ -25,10 +25,11 @@ if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 // ─── Bot Branding ───
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Shadow Dev";
+const startTime = Date.now();
 
 // ─── Status State ───
 const status = {
-  connection: "starting", // starting | pairing | connecting | connected | disconnected
+  connection: "starting",
   pairingCode: null,
   qrCodeAvailable: false,
   qrCodeSvg: null,
@@ -342,7 +343,6 @@ async function startBot() {
   if (!sock.authState.creds.registered) {
     setStatus({ connection: "pairing" });
     
-    // QR Listener
     const qrListener = async (update) => {
       const { qr } = update;
       if (!qr) return;
@@ -378,8 +378,9 @@ async function startBot() {
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
-      if (!msg.message || msg.key.fromMe) continue;
-      await handleCommand(sock, msg);
+      if (!msg.message) continue;
+      // Pass startTime to command handler for runtime calculation
+      await handleCommand(sock, msg, { startTime });
     }
   });
 

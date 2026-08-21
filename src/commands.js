@@ -3,7 +3,7 @@ const fs = require("fs");
 
 const PREFIX = ".";
 const BOT_NAME = "Nexora Bot Mini";
-const MENU_IMAGE = "https://files.catbox.moe/qvsvi2.jpg";
+const MENU_IMAGE = "https://ibb.co/TB8XpF2T"; // User provided image
 const OWNER = process.env.OWNER_NUMBER || "263716808196";
 
 // ── Nexa VDL Config ──
@@ -21,7 +21,6 @@ const headers = {
 function getMessageText(msg) {
   const m = msg.message;
   if (!m) return "";
-  // Handle regular text, quoted text, and button responses
   return (
     m.conversation || 
     m.extendedTextMessage?.text || 
@@ -54,20 +53,28 @@ function extractUrl(text) {
   return match ? match[0] : null;
 }
 
+function getRuntime(startTime) {
+  const now = Date.now();
+  const diff = now - startTime;
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+  const minutes = Math.floor((diff / (1000 * 60)) % 60);
+  const seconds = Math.floor((diff / 1000) % 60);
+  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+}
+
 // ── Nexa VDL Logic ──
 async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
 
   try {
-    // 1. Get Info
     const infoRes = await axios.post(`${API_URL}/api/media/info`, { url }, { headers });
     if (!infoRes.data.success) throw new Error(infoRes.data.error || "Failed to fetch media info");
     
     const title = infoRes.data.title || "Nexora Download";
     await reply(sock, msg, `🎬 *Found:* ${title.slice(0, 50)}...\n⏱️ *Starting download...*`);
 
-    // 2. Start Download
     const dlRes = await axios.post(`${API_URL}/api/media/download`, { url, type, quality: "720p" }, { headers });
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
     
@@ -75,17 +82,13 @@ async function downloadMedia(sock, msg, url, type = "video") {
     let attempts = 0;
     let statusData = null;
 
-    // 3. Poll Status
     while (attempts < MAX_POLL_ATTEMPTS) {
       attempts++;
       await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-      
       const statusRes = await axios.get(`${API_URL}/api/status/${jobId}`, { headers });
       statusData = statusRes.data;
-
       if (statusData.status === "completed") break;
       if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
-      
       if (attempts % 10 === 0 && statusData.progress) {
         await reply(sock, msg, `⏳ *Progress:* ${statusData.progress}%`);
       }
@@ -93,7 +96,6 @@ async function downloadMedia(sock, msg, url, type = "video") {
 
     if (!statusData || statusData.status !== "completed") throw new Error("Download timed out");
 
-    // 4. Send File
     await reply(sock, msg, `✅ *Download complete!*\n📤 *Sending file...*`);
     const fileUrl = `${API_URL}/api/download/${jobId}`;
     const buffer = await urlToBuffer(fileUrl);
@@ -104,12 +106,34 @@ async function downloadMedia(sock, msg, url, type = "video") {
       await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *${title}*`, fileName: `${title}.mp4` }, { quoted: msg });
     }
     await react(sock, msg, "✅");
-
   } catch (err) {
-    console.error("VDL Error:", err.message);
     await reply(sock, msg, `❌ *Nexora Error:* ${err.message}`);
     await react(sock, msg, "❌");
   }
+}
+
+async function showDownloadButtons(sock, msg, url, title, thumbnail, platform) {
+  const jid = msg.key.remoteJid;
+  const caption = `📥 *NEXORA DOWNLOADER*\n\n` +
+                  `📌 *Title:* ${title.slice(0, 60)}\n` +
+                  `🌐 *Platform:* ${platform}\n` +
+                  `🔗 *URL:* ${url}\n\n` +
+                  `_Select an option below:_`;
+
+  const buttons = [
+    { buttonId: `dl_video|${url}`, buttonText: { displayText: "🎥 Video" }, type: 1 },
+    { buttonId: `dl_audio|${url}`, buttonText: { displayText: "🎵 Audio" }, type: 1 }
+  ];
+
+  const buttonMessage = {
+    image: { url: thumbnail || MENU_IMAGE },
+    caption: caption,
+    footer: `Nexora Bot Mini • Shadow Dev`,
+    buttons: buttons,
+    headerType: 4
+  };
+
+  await sock.sendMessage(jid, buttonMessage, { quoted: msg });
 }
 
 async function searchYouTubeWithButtons(sock, msg, query) {
@@ -118,79 +142,59 @@ async function searchYouTubeWithButtons(sock, msg, query) {
     await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
     const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
     if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
-
     const topResult = res.data[0];
-    const caption = `🎬 *NEXORA SEARCH RESULT*\n\n` +
-                    `📌 *Title:* ${topResult.title}\n` +
-                    `⏱️ *Duration:* ${topResult.duration}\n` +
-                    `🔗 *URL:* ${topResult.url}\n\n` +
-                    `_Select an option below to download:_`;
-
-    const buttons = [
-      { buttonId: `dl_video|${topResult.url}`, buttonText: { displayText: "🎥 Download Video" }, type: 1 },
-      { buttonId: `dl_audio|${topResult.url}`, buttonText: { displayText: "🎵 Download Audio" }, type: 1 }
-    ];
-
-    const buttonMessage = {
-      image: { url: topResult.thumbnail },
-      caption: caption,
-      footer: `Nexora Bot Mini • ${AUTHOR}`,
-      buttons: buttons,
-      headerType: 4
-    };
-
-    await sock.sendMessage(jid, buttonMessage, { quoted: msg });
+    await showDownloadButtons(sock, msg, topResult.url, topResult.title, topResult.thumbnail, "YouTube");
   } catch (err) {
     await reply(sock, msg, `❌ *Search failed:* ${err.message}`);
   }
 }
 
-function buildMenu(pushName) {
-  const time = new Date().toLocaleTimeString("en-US", { hour12: true });
-  return `✨ *WELCOME TO NEXORA MINI* ✨
+function buildMenu(pushName, runtime) {
+  return `┌──『 *${BOT_NAME.toUpperCase()}* 』───
+│
+│ ➻ *STATUS:* ONLINE ✅
+│ ➻ *RUNTIME:* ${runtime}
+│ ➻ *MODE:* Public
+│ ➻ *ACTIVE BOTS:* 1
+│ ➻ *TOTAL CMDS:* 206+
+│ ➻ *DEV:* SHADOW DEV
+│
+└───────────────┈ ➻
 
-👋 *Hello,* ${pushName}
-🕒 *Time:* ${time}
-🤖 *Bot:* ${BOT_NAME}
-🔣 *Prefix:* \`${PREFIX}\`
-
-━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 *CORE COMMANDS*
-┣ \`${PREFIX}ping\` - Latency test
-┣ \`${PREFIX}alive\` - System status
-┣ \`${PREFIX}owner\` - Creator info
-┗ \`${PREFIX}menu\` - Show menu
+┣ \`${PREFIX}ping\`
+┣ \`${PREFIX}alive\`
+┣ \`${PREFIX}owner\`
+┗ \`${PREFIX}menu\`
 
-📥 *DOWNLOADER (NEXA VDL)*
-┣ \`${PREFIX}yts\` - Search with Buttons
-┣ \`${PREFIX}vid\` - Search & Download Video
-┣ \`${PREFIX}song\` - Search & Download Audio
-┣ \`${PREFIX}yt\` - YouTube Link Downloader
-┣ \`${PREFIX}fb\` - Facebook Downloader
-┣ \`${PREFIX}ig\` - Instagram Downloader
-┗ \`${PREFIX}tt\` - TikTok Downloader
+📥 *DOWNLOADER*
+┣ \`${PREFIX}yts\` (Search)
+┣ \`${PREFIX}vid\` (Search & DL)
+┣ \`${PREFIX}song\` (Search & DL)
+┣ \`${PREFIX}yt\` (Link)
+┣ \`${PREFIX}fb\` (Facebook)
+┣ \`${PREFIX}ig\` (Instagram)
+┗ \`${PREFIX}tt\` (TikTok)
 
 🛡️ *GROUP TOOLS*
-┣ \`${PREFIX}tagall\` - Summon all
-┣ \`${PREFIX}groupinfo\` - Group stats
-┣ \`${PREFIX}link\` - Invite link
-┗ \`${PREFIX}mute\` / \`${PREFIX}unmute\`
+┣ \`${PREFIX}tagall\`
+┣ \`${PREFIX}groupinfo\`
+┗ \`${PREFIX}link\`
 
 🎨 *FUN & TOOLS*
-┣ \`${PREFIX}sticker\` - Image to sticker
-┣ \`${PREFIX}joke\` - Random laugh
-┣ \`${PREFIX}quote\` - Inspiration
-┗ \`${PREFIX}wiki\` - Search Wiki
+┣ \`${PREFIX}sticker\`
+┣ \`${PREFIX}joke\`
+┣ \`${PREFIX}quote\`
+┗ \`${PREFIX}wiki\`
 
-━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 _“Efficiency in every message.”_`;
 }
 
 // ── Main Handler ──────────────────────────────────────────────────────────────
-async function handleCommand(sock, msg) {
+async function handleCommand(sock, msg, { startTime }) {
   try {
     const jid = msg.key.remoteJid;
-    const sender = msg.key.participant || jid;
     const pushName = msg.pushName || "User";
     const rawText = getMessageText(msg).trim();
 
@@ -211,7 +215,8 @@ async function handleCommand(sock, msg) {
 
     switch (cmd) {
       case "menu":
-        const menu = buildMenu(pushName);
+        const runtime = getRuntime(startTime);
+        const menu = buildMenu(pushName, runtime);
         try {
           const buf = await urlToBuffer(MENU_IMAGE);
           await sock.sendMessage(jid, { image: buf, caption: menu }, { quoted: msg });
@@ -240,30 +245,37 @@ async function handleCommand(sock, msg) {
         if (vidUrl) {
           await downloadMedia(sock, msg, vidUrl, "video");
         } else {
-          // Default to showing buttons for search result
           await searchYouTubeWithButtons(sock, msg, text);
         }
         break;
 
       case "song":
-      case "mp3":
         if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}song <song name>`);
         const songUrl = extractUrl(text);
         if (songUrl) {
           await downloadMedia(sock, msg, songUrl, "audio");
         } else {
-          // Default to showing buttons for search result
           await searchYouTubeWithButtons(sock, msg, text);
         }
         break;
 
-      case "yt":
       case "fb":
       case "ig":
       case "tt":
-        const url = extractUrl(text);
-        if (!url) return reply(sock, msg, `❌ *Please provide a valid link!*`);
-        await downloadMedia(sock, msg, url, "video");
+      case "yt":
+        const link = extractUrl(text);
+        if (!link) return reply(sock, msg, `❌ *Please provide a valid link!*`);
+        // Show buttons for these platforms too
+        try {
+          const infoRes = await axios.post(`${API_URL}/api/media/info`, { url: link }, { headers });
+          if (infoRes.data.success) {
+            await showDownloadButtons(sock, msg, link, infoRes.data.title || "Media", infoRes.data.thumbnail, cmd.toUpperCase());
+          } else {
+            await downloadMedia(sock, msg, link, "video");
+          }
+        } catch {
+          await downloadMedia(sock, msg, link, "video");
+        }
         break;
 
       case "sticker":
