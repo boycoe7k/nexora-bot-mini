@@ -5,7 +5,7 @@ const PREFIX = ".";
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Boycoe-dev";
 const MENU_IMAGE = "https://ibb.co/TB8XpF2T";
-const OWNER = process.env.OWNER_NUMBER || "263716808196";
+const OWNER = process.env.OWNER_NUMBER || "263781021754";
 
 // ── Nexa VDL Config ──
 const API_URL = "https://video-download-api-l5m6.onrender.com";

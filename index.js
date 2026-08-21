@@ -121,7 +121,7 @@ app.get("/", (req, res) => {
     <div id="pair-section">
       <div class="input-group">
         <label>Enter your WhatsApp number with country code</label>
-        <input type="text" id="phone-input" placeholder="+263716808196">
+        <input type="text" id="phone-input" placeholder="+263781021754">
       </div>
       <button class="btn-main" id="gen-btn" onclick="generatePairCode()"><i class="fas fa-key"></i> Generate Pair Code</button>
       <div class="display-box" id="code-box">Your pair code will appear here</div>
@@ -215,7 +215,6 @@ async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
-  // Switch to Windows Chrome for maximum linking compatibility
   const sock = makeWASocket({
     version,
     logger: pino({ level: "silent" }),
