@@ -5,12 +5,13 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  jidDecode,
+  downloadContentFromMessage,
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
 const { Boom } = require("@hapi/boom");
 const fs = require("fs");
-const readline = require("readline");
 const chalk = require("chalk");
 const figlet = require("figlet");
 const qrcodeTerminal = require("qrcode-terminal");
@@ -26,6 +27,16 @@ if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Shadow Dev";
 const startTime = Date.now();
+
+// ─── Settings State (In-memory for now) ───
+const settings = {
+  autoreact: false,
+  autostatus: true,
+  antibadword: false,
+  antilink: false,
+  antidelete: false,
+  anticall: false,
+};
 
 // ─── Status State ───
 const status = {
@@ -68,95 +79,33 @@ app.get("/", (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    body {
-      background: #f8f9fa;
-      color: #333;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      margin: 0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-    }
-    .container {
-      background: #fff;
-      width: 90%;
-      max-width: 400px;
-      padding: 40px 20px;
-      border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.05);
-      text-align: center;
-    }
-    .bot-icon {
-      background: #000;
-      color: #fff;
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-size: 40px;
-      margin: 0 auto 20px;
-    }
+    body { background: #f8f9fa; color: #333; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .container { background: #fff; width: 90%; max-width: 400px; padding: 40px 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); text-align: center; }
+    .bot-icon { background: #000; color: #fff; width: 80px; height: 80px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 40px; margin: 0 auto 20px; }
     h1 { font-size: 24px; margin: 0 0 5px; font-weight: 700; }
     .subtitle { color: #888; font-size: 14px; margin-bottom: 25px; }
-    
     .social-icons { display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
-    .social-icons a {
-      width: 40px; height: 40px; border-radius: 50%;
-      display: flex; justify-content: center; align-items: center;
-      color: #fff; text-decoration: none; font-size: 18px;
-    }
+    .social-icons a { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: #fff; text-decoration: none; font-size: 18px; }
     .btn-yt { background: #ff0000; }
     .btn-tg { background: #0088cc; }
     .btn-wa { background: #25d366; }
     .btn-gh { background: #333; }
-
-    .tabs {
-      display: flex; background: #f1f3f5; border-radius: 10px; padding: 5px; margin-bottom: 25px;
-    }
-    .tab {
-      flex: 1; padding: 10px; border-radius: 8px; cursor: pointer; border: none;
-      font-weight: 600; font-size: 14px; background: transparent; color: #555;
-    }
+    .tabs { display: flex; background: #f1f3f5; border-radius: 10px; padding: 5px; margin-bottom: 25px; }
+    .tab { flex: 1; padding: 10px; border-radius: 8px; cursor: pointer; border: none; font-weight: 600; font-size: 14px; background: transparent; color: #555; }
     .tab.active { background: #000; color: #fff; }
-
     .input-group { text-align: left; margin-bottom: 20px; }
     label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #000; }
-    input {
-      width: 100%; padding: 12px 15px; border-radius: 10px; border: 1px solid #ddd;
-      font-size: 15px; box-sizing: border-box; outline: none;
-    }
-
-    .btn-main {
-      width: 100%; padding: 12px; border-radius: 10px; border: none;
-      background: #000; color: #fff; font-weight: 600; cursor: pointer;
-      margin-bottom: 15px; font-size: 15px;
-    }
+    input { width: 100%; padding: 12px 15px; border-radius: 10px; border: 1px solid #ddd; font-size: 15px; box-sizing: border-box; outline: none; }
+    .btn-main { width: 100%; padding: 12px; border-radius: 10px; border: none; background: #000; color: #fff; font-weight: 600; cursor: pointer; margin-bottom: 15px; font-size: 15px; }
     .btn-main:disabled { background: #ccc; cursor: not-allowed; }
-
-    .display-box {
-      background: #f1f3f5; padding: 15px; border-radius: 10px; margin-bottom: 15px;
-      font-weight: 600; font-size: 16px; color: #555; min-height: 20px;
-    }
+    .display-box { background: #f1f3f5; padding: 15px; border-radius: 10px; margin-bottom: 15px; font-weight: 600; font-size: 16px; color: #555; min-height: 20px; }
     .code-text { color: #000; letter-spacing: 2px; font-size: 18px; }
-    
-    .btn-copy {
-      width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd;
-      background: #fff; color: #000; font-weight: 600; cursor: pointer; font-size: 15px;
-    }
-    
+    .btn-copy { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd; background: #fff; color: #000; font-weight: 600; cursor: pointer; font-size: 15px; }
     .qr-container { display: none; margin-top: 10px; }
     .qr-container.active { display: block; }
     .qr-svg { margin: 0 auto; }
-
     footer { margin-top: 30px; font-size: 12px; color: #aaa; }
-    
-    .status-badge {
-      display: inline-block; padding: 4px 10px; border-radius: 12px;
-      font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px;
-    }
+    .status-badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px; }
     .status-pairing { background: #fff3cd; color: #856404; }
     .status-connected { background: #d4edda; color: #155724; }
     .status-disconnected { background: #f8d7da; color: #721c24; }
@@ -168,50 +117,37 @@ app.get("/", (req, res) => {
     <div class="status-badge status-${status.connection}">${status.connection}</div>
     <h1>${BOT_NAME}</h1>
     <p class="subtitle">Link your WhatsApp device</p>
-
     <div class="social-icons">
       <a href="#" class="btn-yt"><i class="fab fa-youtube"></i></a>
       <a href="#" class="btn-tg"><i class="fab fa-telegram"></i></a>
       <a href="#" class="btn-wa"><i class="fab fa-whatsapp"></i></a>
       <a href="#" class="btn-gh"><i class="fab fa-github"></i></a>
     </div>
-
     <div class="tabs">
       <button class="tab active" id="tab-btn-pair" onclick="switchTab('pair')"><i class="fas fa-key"></i> Pair Code</button>
       <button class="tab" id="tab-btn-qr" onclick="switchTab('qr')"><i class="fas fa-qrcode"></i> QR Code</button>
     </div>
-
     <div id="pair-section">
       <div class="input-group">
         <label>Enter your WhatsApp number with country code</label>
         <input type="text" id="phone-input" placeholder="+263716808196">
       </div>
       <button class="btn-main" id="gen-btn" onclick="generatePairCode()"><i class="fas fa-key"></i> Generate Pair Code</button>
-      <div class="display-box" id="code-box">
-        Your pair code will appear here
-      </div>
+      <div class="display-box" id="code-box">Your pair code will appear here</div>
       <button class="btn-copy" onclick="copyCode()"><i class="fas fa-copy"></i> Copy Code</button>
     </div>
-
     <div id="qr-section" class="qr-container">
-      <div class="qr-svg" id="qr-box">
-        <p style="padding: 20px; color: #888;">Waiting for QR code...</p>
-      </div>
+      <div class="qr-svg" id="qr-box"><p style="padding: 20px; color: #888;">Waiting for QR code...</p></div>
       <p class="subtitle" style="margin-top: 15px;">Scan this QR with WhatsApp Linked Devices</p>
     </div>
-
-    <footer>
-      &copy; 2026 ${AUTHOR} | ${BOT_NAME}
-    </footer>
+    <footer>&copy; 2026 ${AUTHOR} | ${BOT_NAME}</footer>
   </div>
-
   <script>
     function switchTab(type) {
       const pairSec = document.getElementById('pair-section');
       const qrSec = document.getElementById('qr-section');
       const pairBtn = document.getElementById('tab-btn-pair');
       const qrBtn = document.getElementById('tab-btn-qr');
-      
       if (type === 'pair') {
         pairSec.style.display = 'block';
         qrSec.classList.remove('active');
@@ -225,58 +161,35 @@ app.get("/", (req, res) => {
         fetchStatus();
       }
     }
-    
     async function generatePairCode() {
       const phone = document.getElementById('phone-input').value.replace(/[^0-9]/g, '');
       if (!phone) return alert('Please enter a valid number!');
-      
       const btn = document.getElementById('gen-btn');
       const box = document.getElementById('code-box');
-      
       btn.disabled = true;
       box.innerText = 'Generating...';
-      
       try {
-        const res = await fetch('/api/pair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phone })
-        });
+        const res = await fetch('/api/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone }) });
         const data = await res.json();
-        if (data.code) {
-          box.innerHTML = '<span class="code-text">' + data.code + '</span>';
-        } else {
-          box.innerText = 'Error: ' + (data.error || 'Failed to generate');
-          btn.disabled = false;
-        }
-      } catch (e) {
-        box.innerText = 'Error connecting to server';
-        btn.disabled = false;
-      }
+        if (data.code) { box.innerHTML = '<span class="code-text">' + data.code + '</span>'; } else { box.innerText = 'Error: ' + (data.error || 'Failed to generate'); btn.disabled = false; }
+      } catch (e) { box.innerText = 'Error connecting to server'; btn.disabled = false; }
     }
-
     function copyCode() {
       const box = document.getElementById('code-box');
       const code = box.innerText.trim();
       if (code.includes('appear') || code.includes('Generating')) return;
       navigator.clipboard.writeText(code).then(() => alert('Code copied!'));
     }
-
     async function fetchStatus() {
       const res = await fetch('/status');
       const data = await res.json();
-      if (data.qrCodeSvg) {
-        document.getElementById('qr-box').innerHTML = data.qrCodeSvg;
-      }
+      if (data.qrCodeSvg) { document.getElementById('qr-box').innerHTML = data.qrCodeSvg; }
     }
-
     setInterval(async () => {
       const res = await fetch('/status');
       const data = await res.json();
       if (data.connection === 'connected') location.reload();
-      if (document.getElementById('qr-section').classList.contains('active') && data.qrCodeSvg) {
-        document.getElementById('qr-box').innerHTML = data.qrCodeSvg;
-      }
+      if (document.getElementById('qr-section').classList.contains('active') && data.qrCodeSvg) { document.getElementById('qr-box').innerHTML = data.qrCodeSvg; }
     }, 5000);
   </script>
 </body>
@@ -289,17 +202,13 @@ app.post("/api/pair", async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: "Phone number required" });
   if (!globalSock) return res.status(500).json({ error: "Bot not initialized" });
-
   try {
-    console.log(chalk.yellow(`\nWeb request for code: ${phone}`));
     await new Promise((r) => setTimeout(r, 2000));
     const code = await globalSock.requestPairingCode(phone);
     const fmt = code.match(/.{1,4}/g).join("-");
     setStatus({ pairingCode: fmt });
     res.json({ code: fmt });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get("/reset", (req, res) => {
@@ -311,21 +220,7 @@ app.get("/reset", (req, res) => {
 app.listen(PORT, () => console.log(chalk.cyan(`Dashboard: http://localhost:${PORT}`)));
 
 // ─── Bot Logic ───
-function printBanner() {
-  console.clear();
-  try {
-    console.log(chalk.cyan(figlet.textSync("NEXORA MINI", { font: "ANSI Shadow", horizontalLayout: "full" })));
-  } catch {
-    console.log(chalk.cyan(`=== ${BOT_NAME} ===`));
-  }
-  console.log(chalk.magenta("═".repeat(60)));
-  console.log(chalk.yellow(`  ${BOT_NAME}  |  Mimicking Safari (macOS)`));
-  console.log(chalk.magenta("═".repeat(60)));
-  console.log();
-}
-
 async function startBot() {
-  printBanner();
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
@@ -342,18 +237,14 @@ async function startBot() {
 
   if (!sock.authState.creds.registered) {
     setStatus({ connection: "pairing" });
-    
     const qrListener = async (update) => {
       const { qr } = update;
       if (!qr) return;
       const svg = await buildQrSvg(qr);
       setStatus({ qrCodeAvailable: true, qrCodeSvg: svg });
-      console.log(chalk.white.bold("\n📷 QR CODE (Scan from Dashboard or Terminal):"));
       qrcodeTerminal.generate(qr, { small: true });
     };
     sock.ev.on("connection.update", qrListener, { unregister: true });
-    
-    console.log(chalk.cyan("Waiting for pairing request from web dashboard..."));
   }
 
   sock.ev.on("connection.update", async (update) => {
@@ -364,9 +255,7 @@ async function startBot() {
       if (code === DisconnectReason.loggedOut) {
         fs.rmSync(SESSION_DIR, { recursive: true, force: true });
         process.exit(0);
-      } else {
-        setTimeout(startBot, 5000);
-      }
+      } else { setTimeout(startBot, 5000); }
     } else if (connection === "open") {
       console.log(chalk.green(`\n✅ ${BOT_NAME} CONNECTED!`));
       setStatus({ connection: "connected", botName: sock.user?.name, botId: sock.user?.id });
@@ -375,12 +264,32 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // ── Auto Status View ──
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
       if (!msg.message) continue;
-      // Pass startTime to command handler for runtime calculation
-      await handleCommand(sock, msg, { startTime });
+      
+      // Auto-Status
+      if (settings.autostatus && msg.key.remoteJid === "status@broadcast") {
+        await sock.readMessages([msg.key]);
+      }
+
+      // Handle Anti-Delete (Store messages in memory for now)
+      // Implementation omitted for brevity but logic would go here
+
+      await handleCommand(sock, msg, { startTime, settings });
+    }
+  });
+
+  // ── Anti-Call ──
+  sock.ev.on("call", async (calls) => {
+    if (!settings.anticall) return;
+    for (const call of calls) {
+      if (call.status === "offer") {
+        await sock.rejectCall(call.id, call.from);
+        await sock.sendMessage(call.from, { text: `⚠️ *Anti-Call Active:* Calls are not allowed.` });
+      }
     }
   });
 

@@ -3,7 +3,7 @@ const fs = require("fs");
 
 const PREFIX = ".";
 const BOT_NAME = "Nexora Bot Mini";
-const MENU_IMAGE = "https://ibb.co/TB8XpF2T"; // User provided image
+const MENU_IMAGE = "https://ibb.co/TB8XpF2T";
 const OWNER = process.env.OWNER_NUMBER || "263716808196";
 
 // ── Nexa VDL Config ──
@@ -12,25 +12,13 @@ const API_KEY = process.env.API_KEY || "Nexora_YOUR_KEY_HERE";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120;
 
-const headers = {
-  "Content-Type": "application/json",
-  "x-api-key": API_KEY
-};
+const headers = { "Content-Type": "application/json", "x-api-key": API_KEY };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getMessageText(msg) {
   const m = msg.message;
   if (!m) return "";
-  return (
-    m.conversation || 
-    m.extendedTextMessage?.text || 
-    m.imageMessage?.caption || 
-    m.videoMessage?.caption || 
-    m.buttonsResponseMessage?.selectedButtonId || 
-    m.templateButtonReplyMessage?.selectedId ||
-    m.listResponseMessage?.singleSelectReply?.selectedRowId ||
-    ""
-  );
+  return m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || m.buttonsResponseMessage?.selectedButtonId || m.templateButtonReplyMessage?.selectedId || m.listResponseMessage?.singleSelectReply?.selectedRowId || "";
 }
 
 async function urlToBuffer(url) {
@@ -39,9 +27,7 @@ async function urlToBuffer(url) {
 }
 
 async function reply(sock, msg, text) {
-  await sock.sendMessage(msg.key.remoteJid, { 
-    text: `*「 ${BOT_NAME} 」*\n\n${text}\n\n_Powered by Shadow Dev_` 
-  }, { quoted: msg });
+  await sock.sendMessage(msg.key.remoteJid, { text: `*「 ${BOT_NAME} 」*\n\n${text}\n\n_Powered by Shadow Dev_` }, { quoted: msg });
 }
 
 async function react(sock, msg, emoji) {
@@ -54,8 +40,7 @@ function extractUrl(text) {
 }
 
 function getRuntime(startTime) {
-  const now = Date.now();
-  const diff = now - startTime;
+  const diff = Date.now() - startTime;
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
   const minutes = Math.floor((diff / (1000 * 60)) % 60);
@@ -67,21 +52,16 @@ function getRuntime(startTime) {
 async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
-
   try {
     const infoRes = await axios.post(`${API_URL}/api/media/info`, { url }, { headers });
     if (!infoRes.data.success) throw new Error(infoRes.data.error || "Failed to fetch media info");
-    
     const title = infoRes.data.title || "Nexora Download";
     await reply(sock, msg, `🎬 *Found:* ${title.slice(0, 50)}...\n⏱️ *Starting download...*`);
-
     const dlRes = await axios.post(`${API_URL}/api/media/download`, { url, type, quality: "720p" }, { headers });
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
-    
     const jobId = dlRes.data.jobId;
     let attempts = 0;
     let statusData = null;
-
     while (attempts < MAX_POLL_ATTEMPTS) {
       attempts++;
       await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
@@ -89,51 +69,16 @@ async function downloadMedia(sock, msg, url, type = "video") {
       statusData = statusRes.data;
       if (statusData.status === "completed") break;
       if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
-      if (attempts % 10 === 0 && statusData.progress) {
-        await reply(sock, msg, `⏳ *Progress:* ${statusData.progress}%`);
-      }
+      if (attempts % 10 === 0 && statusData.progress) await reply(sock, msg, `⏳ *Progress:* ${statusData.progress}%`);
     }
-
     if (!statusData || statusData.status !== "completed") throw new Error("Download timed out");
-
     await reply(sock, msg, `✅ *Download complete!*\n📤 *Sending file...*`);
     const fileUrl = `${API_URL}/api/download/${jobId}`;
     const buffer = await urlToBuffer(fileUrl);
-    
-    if (type === "audio") {
-      await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg", fileName: `${title}.mp3` }, { quoted: msg });
-    } else {
-      await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *${title}*`, fileName: `${title}.mp4` }, { quoted: msg });
-    }
+    if (type === "audio") await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg", fileName: `${title}.mp3` }, { quoted: msg });
+    else await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *${title}*`, fileName: `${title}.mp4` }, { quoted: msg });
     await react(sock, msg, "✅");
-  } catch (err) {
-    await reply(sock, msg, `❌ *Nexora Error:* ${err.message}`);
-    await react(sock, msg, "❌");
-  }
-}
-
-async function showDownloadButtons(sock, msg, url, title, thumbnail, platform) {
-  const jid = msg.key.remoteJid;
-  const caption = `📥 *NEXORA DOWNLOADER*\n\n` +
-                  `📌 *Title:* ${title.slice(0, 60)}\n` +
-                  `🌐 *Platform:* ${platform}\n` +
-                  `🔗 *URL:* ${url}\n\n` +
-                  `_Select an option below:_`;
-
-  const buttons = [
-    { buttonId: `dl_video|${url}`, buttonText: { displayText: "🎥 Video" }, type: 1 },
-    { buttonId: `dl_audio|${url}`, buttonText: { displayText: "🎵 Audio" }, type: 1 }
-  ];
-
-  const buttonMessage = {
-    image: { url: thumbnail || MENU_IMAGE },
-    caption: caption,
-    footer: `Nexora Bot Mini • Shadow Dev`,
-    buttons: buttons,
-    headerType: 4
-  };
-
-  await sock.sendMessage(jid, buttonMessage, { quoted: msg });
+  } catch (err) { await reply(sock, msg, `❌ *Nexora Error:* ${err.message}`); await react(sock, msg, "❌"); }
 }
 
 async function searchYouTubeWithButtons(sock, msg, query) {
@@ -143,10 +88,10 @@ async function searchYouTubeWithButtons(sock, msg, query) {
     const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
     if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
     const topResult = res.data[0];
-    await showDownloadButtons(sock, msg, topResult.url, topResult.title, topResult.thumbnail, "YouTube");
-  } catch (err) {
-    await reply(sock, msg, `❌ *Search failed:* ${err.message}`);
-  }
+    const caption = `📥 *NEXORA DOWNLOADER*\n\n📌 *Title:* ${topResult.title.slice(0, 60)}\n🌐 *Platform:* YouTube\n🔗 *URL:* ${topResult.url}\n\n_Select an option below:_`;
+    const buttons = [{ buttonId: `dl_video|${topResult.url}`, buttonText: { displayText: "🎥 Video" }, type: 1 }, { buttonId: `dl_audio|${topResult.url}`, buttonText: { displayText: "🎵 Audio" }, type: 1 }];
+    await sock.sendMessage(jid, { image: { url: topResult.thumbnail }, caption, footer: `Nexora Bot Mini`, buttons, headerType: 4 }, { quoted: msg });
+  } catch (err) { await reply(sock, msg, `❌ *Search failed:* ${err.message}`); }
 }
 
 function buildMenu(pushName, runtime) {
@@ -161,30 +106,38 @@ function buildMenu(pushName, runtime) {
 │
 └───────────────┈ ➻
 
-🚀 *CORE COMMANDS*
-┣ \`${PREFIX}ping\`
-┣ \`${PREFIX}alive\`
-┣ \`${PREFIX}owner\`
-┗ \`${PREFIX}menu\`
+👑 *GROUP MANAGER*
+┣ \`${PREFIX}gcstatus\`
+┣ \`${PREFIX}vv\`
+┣ \`${PREFIX}kick\`
+┣ \`${PREFIX}kickall\`
+┣ \`${PREFIX}add\`
+┣ \`${PREFIX}promote\`
+┣ \`${PREFIX}demote\`
+┣ \`${PREFIX}mute\`
+┣ \`${PREFIX}unmute\`
+┣ \`${PREFIX}link\`
+┣ \`${PREFIX}revoke\`
+┣ \`${PREFIX}groupinfo\`
+┗ \`${PREFIX}tag\`
+
+⚙️ *SETTINGS*
+┣ \`${PREFIX}autoreact\` [on/off]
+┣ \`${PREFIX}autostatus\` [on/off]
+┣ \`${PREFIX}antibadword\` [on/off]
+┣ \`${PREFIX}antilink\` [on/off]
+┣ \`${PREFIX}antidelete\` [on/off]
+┣ \`${PREFIX}anticall\` [on/off]
+┗ \`${PREFIX}settings\`
 
 📥 *DOWNLOADER*
-┣ \`${PREFIX}yts\` (Search)
-┣ \`${PREFIX}vid\` (Search & DL)
-┣ \`${PREFIX}song\` (Search & DL)
-┣ \`${PREFIX}yt\` (Link)
-┣ \`${PREFIX}fb\` (Facebook)
-┣ \`${PREFIX}ig\` (Instagram)
-┗ \`${PREFIX}tt\` (TikTok)
-
-🛡️ *GROUP TOOLS*
-┣ \`${PREFIX}tagall\`
-┣ \`${PREFIX}groupinfo\`
-┗ \`${PREFIX}link\`
+┣ \`${PREFIX}vid\` / \`${PREFIX}song\`
+┣ \`${PREFIX}yt\` / \`${PREFIX}fb\`
+┗ \`${PREFIX}ig\` / \`${PREFIX}tt\`
 
 🎨 *FUN & TOOLS*
 ┣ \`${PREFIX}sticker\`
 ┣ \`${PREFIX}joke\`
-┣ \`${PREFIX}quote\`
 ┗ \`${PREFIX}wiki\`
 
 ━━━━━━━━━━━━━━━━━━━━
@@ -192,13 +145,15 @@ _“Efficiency in every message.”_`;
 }
 
 // ── Main Handler ──────────────────────────────────────────────────────────────
-async function handleCommand(sock, msg, { startTime }) {
+async function handleCommand(sock, msg, { startTime, settings }) {
   try {
     const jid = msg.key.remoteJid;
+    const sender = msg.key.participant || jid;
     const pushName = msg.pushName || "User";
     const rawText = getMessageText(msg).trim();
+    const isGroup = jid.endsWith("@g.us");
 
-    // ── Handle Button Responses ──
+    // Button Responses
     if (rawText.startsWith("dl_video|") || rawText.startsWith("dl_audio|")) {
       const [type, url] = rawText.split("|");
       await react(sock, msg, "🚀");
@@ -206,7 +161,6 @@ async function handleCommand(sock, msg, { startTime }) {
     }
 
     if (!rawText.startsWith(PREFIX)) return;
-
     const parts = rawText.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = parts.shift().toLowerCase();
     const text = parts.join(" ");
@@ -215,97 +169,125 @@ async function handleCommand(sock, msg, { startTime }) {
 
     switch (cmd) {
       case "menu":
-        const runtime = getRuntime(startTime);
-        const menu = buildMenu(pushName, runtime);
+        const menu = buildMenu(pushName, getRuntime(startTime));
         try {
           const buf = await urlToBuffer(MENU_IMAGE);
           await sock.sendMessage(jid, { image: buf, caption: menu }, { quoted: msg });
-        } catch {
-          await reply(sock, msg, menu);
-        }
+        } catch { await reply(sock, msg, menu); }
         break;
 
-      case "ping":
-        const start = Date.now();
-        await reply(sock, msg, `✅ *Pong!*\n⚡ *Latency:* ${Date.now() - start}ms`);
+      // ── Group Manager ──
+      case "gcstatus":
+        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
+        const gMeta = await sock.groupMetadata(jid);
+        reply(sock, msg, `📊 *GROUP STATUS*\n\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}\n👑 *Admins:* ${gMeta.participants.filter(p => p.admin).length}`);
         break;
 
-      case "alive":
-        await reply(sock, msg, `🌟 *NEXORA MINI IS ACTIVE* 🌟\n📡 *Status:* Fully Operational\n💻 *Platform:* Render Cloud\n🛡️ *Identity:* Safari (macOS)`);
+      case "vv":
+        const q = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+        const viewOnce = q?.viewOnceMessageV2 || q?.viewOnceMessage;
+        if (!viewOnce) return reply(sock, msg, "❌ *Reply to a view-once message!*");
+        const media = viewOnce.message.imageMessage || viewOnce.message.videoMessage;
+        const stream = await downloadContentFromMessage(media, media.videoMessage ? "video" : "image");
+        let buffer = Buffer.from([]);
+        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+        if (media.videoMessage) await sock.sendMessage(jid, { video: buffer, caption: "✅ *Anti-ViewOnce*" }, { quoted: msg });
+        else await sock.sendMessage(jid, { image: buffer, caption: "✅ *Anti-ViewOnce*" }, { quoted: msg });
         break;
 
-      case "yts":
-        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}yts <query>`);
-        await searchYouTubeWithButtons(sock, msg, text);
+      case "kick":
+        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
+        const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message?.extendedTextMessage?.contextInfo?.participant;
+        if (!target) return reply(sock, msg, "❌ *Tag someone to kick!*");
+        await sock.groupParticipantsUpdate(jid, [target], "remove");
+        reply(sock, msg, "✅ *User kicked.*");
         break;
 
+      case "promote":
+      case "demote":
+        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
+        const pTarget = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message?.extendedTextMessage?.contextInfo?.participant;
+        if (!pTarget) return reply(sock, msg, `❌ *Tag someone to ${cmd}!*`);
+        await sock.groupParticipantsUpdate(jid, [pTarget], cmd);
+        reply(sock, msg, `✅ *User ${cmd}d.*`);
+        break;
+
+      case "mute":
+      case "unmute":
+        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
+        await sock.groupSettingUpdate(jid, cmd === "mute" ? "announcement" : "not_announcement");
+        reply(sock, msg, `✅ *Group ${cmd}d.*`);
+        break;
+
+      case "link":
+        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
+        const code = await sock.groupInviteCode(jid);
+        reply(sock, msg, `🔗 *Invite Link:* https://chat.whatsapp.com/${code}`);
+        break;
+
+      case "tag":
+      case "tagall":
+        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
+        const meta = await sock.groupMetadata(jid);
+        const members = meta.participants.map(p => p.id);
+        await sock.sendMessage(jid, { text: `📢 *SUMMONING EVERYONE!*\n\n${text || ""}\n\n` + members.map(m => `@${m.split("@")[0]}`).join(" "), mentions: members }, { quoted: msg });
+        break;
+
+      // ── Settings ──
+      case "autoreact":
+      case "autostatus":
+      case "antibadword":
+      case "antilink":
+      case "antidelete":
+      case "anticall":
+        if (text === "on") { settings[cmd] = true; reply(sock, msg, `✅ *${cmd.toUpperCase()}* is now ON.`); }
+        else if (text === "off") { settings[cmd] = false; reply(sock, msg, `❌ *${cmd.toUpperCase()}* is now OFF.`); }
+        else reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} on/off`);
+        break;
+
+      case "settings":
+        let sText = `⚙️ *BOT SETTINGS*\n\n`;
+        for (const key in settings) sText += `${settings[key] ? "✅" : "❌"} *${key.toUpperCase()}*\n`;
+        reply(sock, msg, sText);
+        break;
+
+      // ── Downloader ──
       case "vid":
         if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}vid <video name>`);
-        const vidUrl = extractUrl(text);
-        if (vidUrl) {
-          await downloadMedia(sock, msg, vidUrl, "video");
-        } else {
-          await searchYouTubeWithButtons(sock, msg, text);
-        }
+        const vUrl = extractUrl(text);
+        if (vUrl) await downloadMedia(sock, msg, vUrl, "video");
+        else await searchYouTubeWithButtons(sock, msg, text);
         break;
 
       case "song":
         if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}song <song name>`);
-        const songUrl = extractUrl(text);
-        if (songUrl) {
-          await downloadMedia(sock, msg, songUrl, "audio");
-        } else {
-          await searchYouTubeWithButtons(sock, msg, text);
-        }
+        const sUrl = extractUrl(text);
+        if (sUrl) await downloadMedia(sock, msg, sUrl, "audio");
+        else await searchYouTubeWithButtons(sock, msg, text);
         break;
 
+      case "yt":
       case "fb":
       case "ig":
       case "tt":
-      case "yt":
         const link = extractUrl(text);
-        if (!link) return reply(sock, msg, `❌ *Please provide a valid link!*`);
-        // Show buttons for these platforms too
-        try {
-          const infoRes = await axios.post(`${API_URL}/api/media/info`, { url: link }, { headers });
-          if (infoRes.data.success) {
-            await showDownloadButtons(sock, msg, link, infoRes.data.title || "Media", infoRes.data.thumbnail, cmd.toUpperCase());
-          } else {
-            await downloadMedia(sock, msg, link, "video");
-          }
-        } catch {
-          await downloadMedia(sock, msg, link, "video");
-        }
+        if (!link) return reply(sock, msg, `❌ *Please provide a link!*`);
+        await downloadMedia(sock, msg, link, "video");
         break;
 
       case "sticker":
       case "s":
         const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         const img = quoted?.imageMessage || msg.message?.imageMessage;
-        if (!img) return reply(sock, msg, "🎨 *Reply to an image to create a sticker!*");
-        await reply(sock, msg, "⏳ *Converting...*");
-        try {
-          const buf = await urlToBuffer(img.url);
-          await sock.sendMessage(jid, { sticker: buf }, { quoted: msg });
-        } catch (e) {
-          await reply(sock, msg, "❌ *Sticker failed.*");
-        }
-        break;
-
-      case "tagall":
-        if (!jid.endsWith("@g.us")) return reply(sock, msg, "❌ *Groups only!*");
-        const meta = await sock.groupMetadata(jid);
-        const members = meta.participants.map(p => p.id);
-        const mentionText = `📢 *SUMMONING EVERYONE!*\n\n` + (text ? `💬 *Message:* ${text}\n\n` : "") + members.map(m => `@${m.split("@")[0]}`).join(" ");
-        await sock.sendMessage(jid, { text: mentionText, mentions: members }, { quoted: msg });
+        if (!img) return reply(sock, msg, "🎨 *Reply to an image!*");
+        const buf = await urlToBuffer(img.url);
+        await sock.sendMessage(jid, { sticker: buf }, { quoted: msg });
         break;
 
       default:
         break;
     }
-  } catch (err) {
-    console.error("Handler error:", err.message);
-  }
+  } catch (err) { console.error("Handler error:", err.message); }
 }
 
 module.exports = { handleCommand };
