@@ -11,6 +11,7 @@ const fs = require("fs");
 const readline = require("readline");
 const chalk = require("chalk");
 const figlet = require("figlet");
+const qrcode = require("qrcode-terminal");
 const express = require("express");
 
 const { handleCommand } = require("./src/commands");
@@ -23,6 +24,7 @@ if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 const status = {
   connection: "starting", // starting | pairing | connecting | connected | disconnected
   pairingCode: null,
+  qrCodeAvailable: false,
   botName: null,
   botId: null,
   lastUpdate: new Date().toISOString(),
@@ -35,9 +37,22 @@ function setStatus(patch) {
 // ─── Minimal HTTP server so Render's free web service stays alive ──────────
 // Render's free tier requires binding to $PORT and responding to HTTP
 // requests (used for the health check). This also gives you a page to see
-// connection state and the pairing code without watching logs.
+// connection state, the pairing code, and the QR code without watching logs.
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Convert a raw QR string to an inline SVG so it renders on the web page.
+function buildQrSvg(qrString, size = 300) {
+  const lines = qrString.split("\n");
+  const width = Math.max(...lines.map((l) => l.length));
+  const rects = [];
+  lines.forEach((line, y) => {
+    for (let x = 0; x < line.length; x++) {
+      if (line[x] === "\u2588") rects.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
+    }
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${width} ${width}" shape-rendering="crispEdges"><rect width="${width}" height="${width}" fill="#ffffff"/>${rects.join("")}</svg>`;
+}
 
 app.get("/", (req, res) => {
   res.type("html").send(`<!DOCTYPE html>
@@ -45,24 +60,161 @@ app.get("/", (req, res) => {
 <head>
   <meta charset="utf-8">
   <title>Shadow Bot Status</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="5">
   <style>
-    body { background:#0b0b0f; color:#e6e6e6; font-family: monospace; padding: 2rem; }
-    .badge { display:inline-block; padding: 4px 10px; border-radius: 6px; font-weight:bold; }
+    :root {
+      --bg: #0b0b14;
+      --card: #161624;
+      --accent: #7c5cfc;
+      --green: #2ecc71;
+      --yellow: #f1c40f;
+      --red: #e74c3c;
+      --muted: #8a8aa0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      background: var(--bg);
+      color: #e8e8f0;
+      font-family: 'Segoe UI', system-ui, monospace;
+      margin: 0;
+      padding: 2rem 1rem;
+    }
+    .container { max-width: 640px; margin: 0 auto; }
+    .banner {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .banner h1 {
+      font-size: 2.2rem;
+      margin: 0 0 .25rem;
+      background: linear-gradient(90deg, #7c5cfc, #00d2ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: 2px;
+    }
+    .banner p { margin: 0; color: var(--muted); font-size: .9rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid #262640;
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .card h2 { margin: 0 0 .75rem; font-size: 1.05rem; color: #c9c9e0; }
+    .badge { display:inline-block; padding: 5px 12px; border-radius: 20px; font-weight:bold; font-size: .9rem; }
     .connected { background:#1f7a3f; }
     .connecting, .starting, .pairing { background:#a67c00; }
     .disconnected { background:#8a1f1f; }
-    .code { font-size: 1.6rem; letter-spacing: 3px; background:#1a1a22; padding: 12px 20px; border-radius: 8px; display:inline-block; margin-top: 1rem; }
-    .muted { color:#888; }
+    .auth-tabs { display: flex; gap: 8px; margin-bottom: 1rem; }
+    .auth-tabs button {
+      flex: 1;
+      background: #23233a;
+      color: #c9c9e0;
+      border: 1px solid #32325a;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: .95rem;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .auth-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .auth-tabs button:hover:not(.active) { border-color: var(--accent); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .code {
+      font-size: 1.8rem;
+      letter-spacing: 4px;
+      background: #0f0f1a;
+      border: 1px dashed #7c5cfc;
+      color: #a8f0c0;
+      padding: 14px 20px;
+      border-radius: 10px;
+      text-align: center;
+      font-weight: bold;
+    }
+    .steps { color: #c9c9e0; line-height: 1.7; font-size: .95rem; margin: 0; }
+    .steps b { color: #fff; }
+    .qr-box {
+      background: #ffffff;
+      border-radius: 10px;
+      padding: 14px;
+      display: inline-block;
+    }
+    .hint { color: var(--muted); font-size: .85rem; margin-top: .75rem; }
+    .muted { color: var(--muted); font-size: .85rem; }
+    .divider { border-top: 1px dashed #32325a; margin: .75rem 0; }
   </style>
 </head>
 <body>
-  <h1>⚡ Shadow Bot</h1>
-  <p>Status: <span class="badge ${status.connection}">${status.connection}</span></p>
-  ${status.pairingCode ? `<p>Pairing code (enter in WhatsApp &rarr; Linked Devices):</p><div class="code">${status.pairingCode}</div>` : ""}
-  ${status.connection === "connected" ? `<p>Linked as: ${status.botName || "Unknown"} (${status.botId || ""})</p>` : ""}
-  <p class="muted">Last update: ${status.lastUpdate}</p>
-  <p class="muted">Page auto-refreshes every 5s.</p>
+  <div class="container">
+    <div class="banner">
+      <h1>⚡ SHADOW BOT</h1>
+      <p>WhatsApp Multi-Device Bot — Shadow Dev</p>
+    </div>
+
+    <div class="card">
+      <h2>📡 Connection</h2>
+      <span class="badge ${status.connection}">${status.connection}</span>
+      ${status.connection === "connected" ? `<p class="hint">Linked as: <b style="color:#fff">${status.botName || "Unknown"}</b> (${status.botId || ""})</p>` : ""}
+    </div>
+
+    ${status.pairingCode || status.qrCodeAvailable ? `
+    <div class="card">
+      <h2>🔗 Authenticate</h2>
+      <div class="auth-tabs">
+        <button class="${status.pairingCode ? "active" : ""}" onclick="showTab('pairing', this)">📱 Pairing Code</button>
+        <button class="${!status.pairingCode && status.qrCodeAvailable ? "active" : ""}" onclick="showTab('qr', this)">📷 QR Code</button>
+      </div>
+
+      <div id="tab-pairing" class="tab-content ${status.pairingCode ? "active" : ""}">
+        ${status.pairingCode ? `
+          <p>Enter this code in WhatsApp → Linked Devices:</p>
+          <div class="code">${status.pairingCode}</div>
+          <p class="steps">
+            <b>1.</b> Open WhatsApp on your phone<br>
+            <b>2.</b> Tap the 3 dots (top right)<br>
+            <b>3.</b> Tap <b>Linked Devices</b><br>
+            <b>4.</b> Tap <b>Link a Device</b><br>
+            <b>5.</b> Tap <b>"Link with phone number instead"</b><br>
+            <b>6.</b> Enter <b>YOUR number</b> and then the code above
+          </p>
+          <p class="hint">⏱️ Code expires in 60 seconds — a fresh code appears on restart.</p>
+        ` : `
+          <p class="hint">A pairing code will appear here once requested.</p>
+        `}
+      </div>
+
+      <div id="tab-qr" class="tab-content ${!status.pairingCode && status.qrCodeAvailable ? "active" : ""}">
+        ${status.qrCodeAvailable ? `
+          <p>Scan this QR with WhatsApp:</p>
+          <div class="qr-box">${status.qrCodeSvg || ""}</div>
+          <p class="steps">
+            <b>1.</b> Open WhatsApp on your phone<br>
+            <b>2.</b> Tap the 3 dots (top right)<br>
+            <b>3.</b> Tap <b>Linked Devices</b> → <b>Link a Device</b><br>
+            <b>4.</b> Scan the QR code above
+          </p>
+          <p class="hint">⏱️ QR expires in ~60 seconds — the bot refreshes it automatically.</p>
+        ` : `
+          <p class="hint">A QR code will appear here once requested.</p>
+        `}
+      </div>
+    </div>
+    ` : ""}
+
+    <p class="muted">Last update: ${status.lastUpdate}</p>
+    <p class="muted">Page auto-refreshes every 5s.</p>
+  </div>
+
+  <script>
+    function showTab(name, btn) {
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.auth-tabs button').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      btn.classList.add('active');
+    }
+  </script>
 </body>
 </html>`);
 });
@@ -81,9 +233,16 @@ function printBanner() {
   } catch (e) {
     console.log(chalk.cyan("=== SHADOW BOT ==="));
   }
-  console.log(chalk.magenta("=".repeat(60)));
-  console.log(chalk.yellow("  WhatsApp Multi-Device Bot  by Shadow Dev"));
-  console.log(chalk.magenta("=".repeat(60)));
+  console.log(chalk.magenta("═".repeat(60)));
+  console.log(
+    chalk.yellow("  WhatsApp Multi-Device Bot") +
+      chalk.white("  •  ") +
+      chalk.magenta.bold("by Shadow Dev")
+  );
+  console.log(
+    chalk.white("  ") + chalk.dim("📱 Pairing code") + chalk.white("  •  ") + chalk.dim("📷 QR code") + chalk.white("  •  ") + chalk.dim("🌐 Web dashboard")
+  );
+  console.log(chalk.magenta("═".repeat(60)));
   console.log();
 }
 
@@ -117,7 +276,22 @@ async function askPhoneNumber() {
   });
 }
 
-async function startBot() {
+// ── Pretty console box helpers ─────────────────────────────────────────────
+function printBox(title, bodyLines) {
+  // Each ANSI-escaped cell is 2 visible chars wide, so halve the lengths
+  const visibleLen = (s) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
+  const cellLen = (s) => Math.ceil(visibleLen(s) / 2);
+  const target = Math.max(cellLen(title), ...bodyLines.map(cellLen)) + 4;
+  const border = chalk.bgGreen.black.bold("═".repeat(target));
+  console.log(border);
+  console.log(chalk.bgGreen.black.bold(("  " + title).padEnd(target)));
+  bodyLines.forEach((line) => {
+    console.log(chalk.bgGreen.black.bold(("  " + line).padEnd(target)));
+  });
+  console.log(border);
+}
+
+async function startBot(qrMode = false) {
   printBanner();
 
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -126,16 +300,47 @@ async function startBot() {
   const sock = makeWASocket({
     version,
     logger: pino({ level: "silent" }),
-    printQRInTerminal: false,
     auth: state,
     browser: ["Ubuntu", "Chrome", "20.0.04"],
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
 
-  // Pairing code flow
+  // Pairing code flow (preferred) + QR code fallback
   if (!sock.authState.creds.registered) {
     setStatus({ connection: "pairing" });
+
+    console.log(chalk.white.bold("\n🔐 AUTHENTICATION REQUIRED\n"));
+    console.log(chalk.cyan("Two ways to link your WhatsApp account:\n"));
+    console.log(chalk.cyan("  📱 METHOD 1 (recommended): PAIRING CODE"));
+    console.log(chalk.cyan("     A code will appear in this console + the web dashboard.\n"));
+    console.log(chalk.cyan("  📷 METHOD 2 (fallback):      QR CODE"));
+    console.log(chalk.cyan("     The QR code appears here if the pairing code fails.\n"));
+    console.log(chalk.dim("   " + "─".repeat(56)));
+
+    // QR mode skips the phone-number prompt entirely
+    if (qrMode) {
+      console.log(chalk.yellow("📷 QR CODE MODE\n"));
+      console.log(chalk.cyan("Scan the QR code with WhatsApp to link this bot."));
+      console.log(chalk.cyan("QR appears in this console + on the web dashboard.\n"));
+      console.log(chalk.dim("   " + "─".repeat(56)));
+      const qrListener = async (update) => {
+        const { qr } = update;
+        if (!qr) return;
+        console.log(chalk.white.bold("\n📷 SCAN THIS QR CODE WITH WHATSAPP:\n"));
+        qrcode.generate(qr, { small: true }, (code) => console.log(chalk.white(code)));
+        console.log(chalk.cyan("\nSTEPS:\n"));
+        console.log(chalk.cyan("1. Open WhatsApp on your phone"));
+        console.log(chalk.cyan("2. Tap the 3 dots (top right)"));
+        console.log(chalk.cyan("3. Tap Linked Devices → Link a Device"));
+        console.log(chalk.cyan("4. Scan the QR code above\n"));
+        console.log(chalk.yellow("QR refreshes automatically. Or use the web dashboard to scan.\n"));
+        setStatus({ qrCodeAvailable: true, qrCodeSvg: buildQrSvg(qr) });
+      };
+      sock.ev.on("connection.update", qrListener, { unregister: true });
+      return sock;
+    }
+
     const phoneNumber = await askPhoneNumber();
 
     console.log(chalk.yellow("\nNumber to use: " + phoneNumber));
@@ -144,29 +349,45 @@ async function startBot() {
     // Must wait for socket before requesting code
     await new Promise((r) => setTimeout(r, 4000));
 
+    let pairingSucceeded = false;
+
+    // ── Try pairing code first ──────────────────────────────────────────
     try {
       const code = await sock.requestPairingCode(phoneNumber);
       const formatted = code.match(/.{1,4}/g).join("-");
-      setStatus({ connection: "pairing", pairingCode: formatted });
+      setStatus({ connection: "pairing", pairingCode: formatted, qrCodeAvailable: false });
+
       console.log("");
-      console.log(chalk.bgGreen.black.bold("  ============================================  "));
-      console.log(chalk.bgGreen.black.bold("   YOUR PAIRING CODE: " + formatted + "              "));
-      console.log(chalk.bgGreen.black.bold("  ============================================  "));
+      printBox("📱 YOUR PAIRING CODE: " + formatted, [
+        "",
+        "STEPS:",
+        "1. Open WhatsApp on your phone",
+        "2. Tap the 3 dots (top right)",
+        "3. Tap Linked Devices",
+        "4. Tap Link a Device",
+        "5. Tap 'Link with phone number instead'",
+        "6. Enter YOUR number: " + phoneNumber,
+        "7. Enter code: " + formatted,
+        "",
+        "⏱️ You have 60 seconds! (or check the status page)",
+      ]);
       console.log("");
-      console.log(chalk.cyan("STEPS:"));
-      console.log(chalk.cyan("1. Open WhatsApp on your phone"));
-      console.log(chalk.cyan("2. Tap the 3 dots (top right)"));
-      console.log(chalk.cyan("3. Tap Linked Devices"));
-      console.log(chalk.cyan("4. Tap Link a Device"));
-      console.log(chalk.cyan("5. Tap 'Link with phone number instead'"));
-      console.log(chalk.cyan("6. Enter YOUR number: " + phoneNumber));
-      console.log(chalk.cyan("7. Enter code: " + formatted));
-      console.log(chalk.yellow("\nYou have 60 seconds! (or check the Render status page)\n"));
+
+      // Pairing code flow started successfully.
+      // If the server later replies that pairing failed, the socket emits
+      // a `qr` in the connection.update event and we show the QR fallback.
+      pairingSucceeded = true;
     } catch (err) {
-      console.error(chalk.red("FAILED to get pairing code: " + err.message));
-      console.error(chalk.yellow("Fix: Run this in console: rm -rf session/  then restart"));
-      setStatus({ connection: "disconnected" });
-      process.exit(1);
+      console.error(chalk.red("⚠️  Pairing code request failed: " + err.message));
+      console.log(chalk.yellow("   Falling back to QR code authentication...\n"));
+      setStatus({ connection: "pairing", pairingCode: null });
+    }
+
+    // ── QR code fallback ────────────────────────────────────────────────
+    if (!pairingSucceeded) {
+      // Close this socket and restart in QR-only mode
+      sock.ws.close();
+      return startBot(true);
     }
   }
 
@@ -175,15 +396,15 @@ async function startBot() {
 
     if (connection === "close") {
       const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
-      console.log(chalk.red("Disconnected. Code: " + statusCode));
-      setStatus({ connection: "disconnected", pairingCode: null });
+      console.log(chalk.red("\n❌ Disconnected. Code: " + statusCode));
+      setStatus({ connection: "disconnected", pairingCode: null, qrCodeAvailable: false });
 
       if (statusCode === DisconnectReason.loggedOut) {
         console.log(chalk.red("Logged out! Clearing session..."));
         fs.rmSync(SESSION_DIR, { recursive: true, force: true });
         process.exit(0);
       } else {
-        console.log(chalk.yellow("Reconnecting in 5 seconds..."));
+        console.log(chalk.yellow("Reconnecting in 5 seconds...\n"));
         setTimeout(startBot, 5000);
       }
     } else if (connection === "open") {
@@ -193,6 +414,7 @@ async function startBot() {
       setStatus({
         connection: "connected",
         pairingCode: null,
+        qrCodeAvailable: false,
         botName: sock.user?.name || "Unknown",
         botId: sock.user?.id || "",
       });
