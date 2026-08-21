@@ -5,6 +5,7 @@ const {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   jidDecode,
   downloadContentFromMessage,
   proto,
@@ -213,8 +214,9 @@ app.listen(PORT, () => console.log(chalk.cyan(`Dashboard: http://localhost:${POR
 // ─── Bot Logic ───
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
-  const { version } = await fetchLatestBaileysVersion();
+  const { version } = await fetchLatestWaWebVersion();
 
+  // Switch to Windows Chrome for maximum linking compatibility
   const sock = makeWASocket({
     version,
     logger: pino({ level: "silent" }),

@@ -13,7 +13,10 @@ const API_KEY = process.env.API_KEY || "Nexora_YOUR_KEY_HERE";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120;
 
-const headers = { "Content-Type": "application/json", "x-api-key": API_KEY };
+const headers = {
+  "Content-Type": "application/json",
+  ...(API_KEY ? { "x-api-key": API_KEY } : {}),
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getMessageText(msg) {
