@@ -12,6 +12,7 @@ const readline = require("readline");
 const chalk = require("chalk");
 const figlet = require("figlet");
 const qrcode = require("qrcode-terminal");
+const QRCode = require("qrcode");
 const express = require("express");
 
 const { handleCommand } = require("./src/commands");
@@ -41,17 +42,16 @@ function setStatus(patch) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Convert a raw QR string to an inline SVG so it renders on the web page.
-function buildQrSvg(qrString, size = 300) {
-  const lines = qrString.split("\n");
-  const width = Math.max(...lines.map((l) => l.length));
-  const rects = [];
-  lines.forEach((line, y) => {
-    for (let x = 0; x < line.length; x++) {
-      if (line[x] === "█") rects.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
-    }
+// Convert the Baileys QR payload string into a real scannable SVG QR code.
+// Baileys' qr payload is comma-joined key data (ref, noise key, identity key,
+// adv secret), NOT an ASCII-art matrix — it must be encoded with a QR library.
+async function buildQrSvg(qrString) {
+  return QRCode.toString(qrString, {
+    type: "svg",
+    width: 300,
+    margin: 1,
+    color: { dark: "#000000", light: "#ffffff" },
   });
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${width} ${width}" shape-rendering="crispEdges"><rect width="${width}" height="${width}" fill="#ffffff"/>${rects.join("")}</svg>`;
 }
 
 app.get("/", (req, res) => {
@@ -159,12 +159,12 @@ app.get("/", (req, res) => {
       ${status.connection === "connected" ? `<p class="hint">Linked as: <b style="color:#fff">${status.botName || "Unknown"}</b> (${status.botId || ""})</p>` : ""}
     </div>
 
-    ${status.pairingCode || status.qrCodeAvailable ? `
+    ${status.pairingCode || status.qrCodeAvailable || status.connection === "pairing" ? `
     <div class="card">
       <h2>🔗 Authenticate</h2>
       <div class="auth-tabs">
         <button class="${status.pairingCode ? "active" : ""}" onclick="showTab('pairing', this)">📱 Pairing Code</button>
-        <button class="${!status.pairingCode && status.qrCodeAvailable ? "active" : ""}" onclick="showTab('qr', this)">📷 QR Code</button>
+        <button class="${!status.pairingCode ? "active" : ""}" onclick="showTab('qr', this)">📷 QR Code</button>
       </div>
 
       <div id="tab-pairing" class="tab-content ${status.pairingCode ? "active" : ""}">
@@ -185,7 +185,7 @@ app.get("/", (req, res) => {
         `}
       </div>
 
-      <div id="tab-qr" class="tab-content ${!status.pairingCode && status.qrCodeAvailable ? "active" : ""}">
+      <div id="tab-qr" class="tab-content ${!status.pairingCode ? "active" : ""}">
         ${status.qrCodeAvailable ? `
           <p>Scan this QR with WhatsApp:</p>
           <div class="qr-box">${status.qrCodeSvg || ""}</div>
@@ -195,9 +195,9 @@ app.get("/", (req, res) => {
             <b>3.</b> Tap <b>Linked Devices</b> → <b>Link a Device</b><br>
             <b>4.</b> Scan the QR code above
           </p>
-          <p class="hint">⏱️ QR expires in ~60 seconds — the bot refreshes it automatically.</p>
+          <p class="hint">⏱️ QR expires in ~60 seconds — refresh the page to get a fresh one.</p>
         ` : `
-          <p class="hint">A QR code will appear here once requested.</p>
+          <p class="hint">Waiting for the QR code… it will appear here automatically (the page refreshes every 5s).</p>
         `}
       </div>
     </div>
@@ -306,38 +306,40 @@ async function startBot(qrMode = false) {
     markOnlineOnConnect: false,
   });
 
-  // Pairing code flow (preferred) + QR code fallback
+  // Pairing code flow (preferred) + QR code available side-by-side
   if (!sock.authState.creds.registered) {
     setStatus({ connection: "pairing" });
+
+    // Register the QR listener ON EVERY startup so the web dashboard can
+    // always render the QR code the server provides, regardless of which
+    // auth method is used. It self-unregisters after the first QR event.
+    const qrListener = async (update) => {
+      const { qr } = update;
+      if (!qr) return;
+      const svg = await buildQrSvg(qr);
+      setStatus({ qrCodeAvailable: true, qrCodeSvg: svg });
+      // Also print it to the terminal (Render logs) when it appears
+      console.log(chalk.white.bold("\n📷 QR CODE (scan with WhatsApp):"));
+      qrcode.generate(qr, { small: true }, (code) => console.log(chalk.white(code)));
+      console.log(chalk.dim("QR also available on the web dashboard."));
+    };
+    sock.ev.on("connection.update", qrListener, { unregister: true });
 
     console.log(chalk.white.bold("\n🔐 AUTHENTICATION REQUIRED\n"));
     console.log(chalk.cyan("Two ways to link your WhatsApp account:\n"));
     console.log(chalk.cyan("  📱 METHOD 1 (recommended): PAIRING CODE"));
     console.log(chalk.cyan("     A code will appear in this console + the web dashboard.\n"));
-    console.log(chalk.cyan("  📷 METHOD 2 (fallback):      QR CODE"));
-    console.log(chalk.cyan("     The QR code appears here if the pairing code fails.\n"));
+    console.log(chalk.cyan("  📷 METHOD 2:               QR CODE"));
+    console.log(chalk.cyan("     A QR code appears on the web dashboard + in these logs.\n"));
     console.log(chalk.dim("   " + "─".repeat(56)));
 
-    // QR mode skips the phone-number prompt entirely
+    // QR mode skips the phone-number prompt entirely (QR listener already
+    // registered above, so nothing extra needed)
     if (qrMode) {
       console.log(chalk.yellow("📷 QR CODE MODE\n"));
       console.log(chalk.cyan("Scan the QR code with WhatsApp to link this bot."));
-      console.log(chalk.cyan("QR appears in this console + on the web dashboard.\n"));
+      console.log(chalk.cyan("QR appears in these logs + on the web dashboard.\n"));
       console.log(chalk.dim("   " + "─".repeat(56)));
-      const qrListener = async (update) => {
-        const { qr } = update;
-        if (!qr) return;
-        console.log(chalk.white.bold("\n📷 SCAN THIS QR CODE WITH WHATSAPP:\n"));
-        qrcode.generate(qr, { small: true }, (code) => console.log(chalk.white(code)));
-        console.log(chalk.cyan("\nSTEPS:\n"));
-        console.log(chalk.cyan("1. Open WhatsApp on your phone"));
-        console.log(chalk.cyan("2. Tap the 3 dots (top right)"));
-        console.log(chalk.cyan("3. Tap Linked Devices → Link a Device"));
-        console.log(chalk.cyan("4. Scan the QR code above\n"));
-        console.log(chalk.yellow("QR refreshes automatically. Or use the web dashboard to scan.\n"));
-        setStatus({ qrCodeAvailable: true, qrCodeSvg: buildQrSvg(qr) });
-      };
-      sock.ev.on("connection.update", qrListener, { unregister: true });
       return sock;
     }
 
@@ -355,7 +357,10 @@ async function startBot(qrMode = false) {
     try {
       const code = await sock.requestPairingCode(phoneNumber);
       const formatted = code.match(/.{1,4}/g).join("-");
-      setStatus({ connection: "pairing", pairingCode: formatted, qrCodeAvailable: false });
+      // NOTE: qrCodeAvailable is intentionally left as-is — the global QR
+      // listener above keeps the QR code live on the dashboard even when
+      // the pairing code is shown, so the user can pick either method.
+      setStatus({ connection: "pairing", pairingCode: formatted });
 
       console.log("");
       printBox("📱 YOUR PAIRING CODE: " + formatted, [
