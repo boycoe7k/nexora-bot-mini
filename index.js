@@ -28,7 +28,7 @@ const status = {
   qrCodeAvailable: false,
   botName: null,
   botId: null,
-  browser: "Shadow Bot (Chrome)",
+  browser: "Safari (macOS)",
   lastUpdate: new Date().toISOString(),
 };
 
@@ -323,7 +323,7 @@ async function startBot(qrMode = false) {
     version,
     logger: pino({ level: "silent" }),
     auth: state,
-    browser: ["Mac OS", "Chrome", "121.0.6167.85"],
+    browser: ["Mac OS", "Safari", "17.0"],
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
