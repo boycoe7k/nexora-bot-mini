@@ -8,8 +8,14 @@ const OWNER = process.env.OWNER_NUMBER || "263716808196";
 
 // ── Nexa VDL Config ──
 const API_URL = "https://video-download-api-l5m6.onrender.com";
+const API_KEY = process.env.API_KEY || "Nexora_YOUR_KEY_HERE";
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 120;
+
+const headers = {
+  "Content-Type": "application/json",
+  "x-api-key": API_KEY
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getMessageText(msg) {
@@ -19,7 +25,7 @@ function getMessageText(msg) {
 }
 
 async function urlToBuffer(url) {
-  const res = await axios.get(url, { responseType: "arraybuffer", timeout: 30000 });
+  const res = await axios.get(url, { responseType: "arraybuffer", timeout: 60000, headers });
   return Buffer.from(res.data);
 }
 
@@ -33,6 +39,11 @@ async function react(sock, msg, emoji) {
   try { await sock.sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } }); } catch (_) {}
 }
 
+function extractUrl(text) {
+  const match = text.match(/https?:\/\/\S+/i);
+  return match ? match[0] : null;
+}
+
 // ── Nexa VDL Logic ──
 async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
@@ -40,14 +51,14 @@ async function downloadMedia(sock, msg, url, type = "video") {
 
   try {
     // 1. Get Info
-    const infoRes = await axios.post(`${API_URL}/api/media/info`, { url });
+    const infoRes = await axios.post(`${API_URL}/api/media/info`, { url }, { headers });
     if (!infoRes.data.success) throw new Error(infoRes.data.error || "Failed to fetch media info");
     
     const title = infoRes.data.title || "Nexora Download";
     await reply(sock, msg, `🎬 *Found:* ${title.slice(0, 50)}...\n⏱️ *Starting download...*`);
 
     // 2. Start Download
-    const dlRes = await axios.post(`${API_URL}/api/media/download`, { url, type, quality: "720p" });
+    const dlRes = await axios.post(`${API_URL}/api/media/download`, { url, type, quality: "720p" }, { headers });
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
     
     const jobId = dlRes.data.jobId;
@@ -59,14 +70,14 @@ async function downloadMedia(sock, msg, url, type = "video") {
       attempts++;
       await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
       
-      const statusRes = await axios.get(`${API_URL}/api/status/${jobId}`);
+      const statusRes = await axios.get(`${API_URL}/api/status/${jobId}`, { headers });
       statusData = statusRes.data;
 
       if (statusData.status === "completed") break;
       if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
       
-      if (attempts % 10 === 0) {
-        await react(sock, msg, "⏳");
+      if (attempts % 10 === 0 && statusData.progress) {
+        await reply(sock, msg, `⏳ *Progress:* ${statusData.progress}%`);
       }
     }
 
@@ -91,6 +102,24 @@ async function downloadMedia(sock, msg, url, type = "video") {
   }
 }
 
+async function searchYouTube(sock, msg, query) {
+  try {
+    await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
+    const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
+    if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
+
+    let resultsText = `🎬 *YOUTUBE SEARCH RESULTS*\n\n`;
+    res.data.slice(0, 6).forEach((res, i) => {
+      resultsText += `*${i + 1}.* ${res.title}\n⏱️ *Duration:* ${res.duration}\n🔗 ${res.url}\n\n`;
+    });
+    resultsText += `_Use ${PREFIX}yt <link> to download_`;
+    
+    await reply(sock, msg, resultsText);
+  } catch (err) {
+    await reply(sock, msg, `❌ *Search failed:* ${err.message}`);
+  }
+}
+
 function buildMenu(pushName) {
   const time = new Date().toLocaleTimeString("en-US", { hour12: true });
   return `✨ *WELCOME TO NEXORA MINI* ✨
@@ -108,6 +137,7 @@ function buildMenu(pushName) {
 ┗ \`${PREFIX}menu\` - Show menu
 
 📥 *DOWNLOADER (NEXA VDL)*
+┣ \`${PREFIX}yts\` - YouTube Search
 ┣ \`${PREFIX}yt\` - YouTube Video
 ┣ \`${PREFIX}song\` - YouTube Audio (MP3)
 ┣ \`${PREFIX}fb\` - Facebook Video
@@ -166,19 +196,40 @@ async function handleCommand(sock, msg) {
         await reply(sock, msg, `🌟 *NEXORA MINI IS ACTIVE* 🌟\n📡 *Status:* Fully Operational\n💻 *Platform:* Render Cloud\n🛡️ *Identity:* Safari (macOS)`);
         break;
 
+      case "yts":
+        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}yts <query>`);
+        await searchYouTube(sock, msg, text);
+        break;
+
       case "yt":
       case "fb":
       case "ig":
       case "tt":
-        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}${cmd} <link>`);
-        await downloadMedia(sock, msg, text, "video");
+        const url = extractUrl(text);
+        if (!url) return reply(sock, msg, `❌ *Please provide a valid link!*`);
+        await downloadMedia(sock, msg, url, "video");
         break;
 
       case "song":
       case "mp3":
-        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}${cmd} <link/search>`);
-        // For now, simple URL handling. Could add search later.
-        await downloadMedia(sock, msg, text, "audio");
+        const songUrl = extractUrl(text);
+        if (songUrl) {
+          await downloadMedia(sock, msg, songUrl, "audio");
+        } else if (text) {
+          // If no URL but text exists, search first
+          try {
+            const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(text)}`, { headers });
+            if (res.data && res.data.length) {
+              await downloadMedia(sock, msg, res.data[0].url, "audio");
+            } else {
+              await reply(sock, msg, "❌ *No results found.*");
+            }
+          } catch (e) {
+            await reply(sock, msg, `❌ *Search failed:* ${e.message}`);
+          }
+        } else {
+          await reply(sock, msg, `❌ *Usage:* ${PREFIX}${cmd} <link/search query>`);
+        }
         break;
 
       case "sticker":
