@@ -6,6 +6,11 @@ const BOT_NAME = "Nexora Bot Mini";
 const MENU_IMAGE = "https://files.catbox.moe/qvsvi2.jpg";
 const OWNER = process.env.OWNER_NUMBER || "263716808196";
 
+// ── Nexa VDL Config ──
+const API_URL = "https://video-download-api-l5m6.onrender.com";
+const POLL_INTERVAL_MS = 3000;
+const MAX_POLL_ATTEMPTS = 120;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getMessageText(msg) {
   const m = msg.message;
@@ -14,7 +19,7 @@ function getMessageText(msg) {
 }
 
 async function urlToBuffer(url) {
-  const res = await axios.get(url, { responseType: "arraybuffer", timeout: 15000 });
+  const res = await axios.get(url, { responseType: "arraybuffer", timeout: 30000 });
   return Buffer.from(res.data);
 }
 
@@ -28,6 +33,64 @@ async function react(sock, msg, emoji) {
   try { await sock.sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } }); } catch (_) {}
 }
 
+// ── Nexa VDL Logic ──
+async function downloadMedia(sock, msg, url, type = "video") {
+  const jid = msg.key.remoteJid;
+  await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
+
+  try {
+    // 1. Get Info
+    const infoRes = await axios.post(`${API_URL}/api/media/info`, { url });
+    if (!infoRes.data.success) throw new Error(infoRes.data.error || "Failed to fetch media info");
+    
+    const title = infoRes.data.title || "Nexora Download";
+    await reply(sock, msg, `🎬 *Found:* ${title.slice(0, 50)}...\n⏱️ *Starting download...*`);
+
+    // 2. Start Download
+    const dlRes = await axios.post(`${API_URL}/api/media/download`, { url, type, quality: "720p" });
+    if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
+    
+    const jobId = dlRes.data.jobId;
+    let attempts = 0;
+    let statusData = null;
+
+    // 3. Poll Status
+    while (attempts < MAX_POLL_ATTEMPTS) {
+      attempts++;
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      
+      const statusRes = await axios.get(`${API_URL}/api/status/${jobId}`);
+      statusData = statusRes.data;
+
+      if (statusData.status === "completed") break;
+      if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
+      
+      if (attempts % 10 === 0) {
+        await react(sock, msg, "⏳");
+      }
+    }
+
+    if (!statusData || statusData.status !== "completed") throw new Error("Download timed out");
+
+    // 4. Send File
+    await reply(sock, msg, `✅ *Download complete!*\n📤 *Sending file...*`);
+    const fileUrl = `${API_URL}/api/download/${jobId}`;
+    const buffer = await urlToBuffer(fileUrl);
+    
+    if (type === "audio") {
+      await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg", fileName: `${title}.mp3` }, { quoted: msg });
+    } else {
+      await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *${title}*`, fileName: `${title}.mp4` }, { quoted: msg });
+    }
+    await react(sock, msg, "✅");
+
+  } catch (err) {
+    console.error("VDL Error:", err.message);
+    await reply(sock, msg, `❌ *Nexora Error:* ${err.message}`);
+    await react(sock, msg, "❌");
+  }
+}
+
 function buildMenu(pushName) {
   const time = new Date().toLocaleTimeString("en-US", { hour12: true });
   return `✨ *WELCOME TO NEXORA MINI* ✨
@@ -39,29 +102,29 @@ function buildMenu(pushName) {
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 🚀 *CORE COMMANDS*
-┣ \`${PREFIX}ping\` - Check bot latency
-┣ \`${PREFIX}alive\` - Bot system status
-┣ \`${PREFIX}owner\` - Contact my creator
-┣ \`${PREFIX}menu\` - Show this interface
-┗ \`${PREFIX}runtime\` - How long I've been active
+┣ \`${PREFIX}ping\` - Latency test
+┣ \`${PREFIX}alive\` - System status
+┣ \`${PREFIX}owner\` - Creator info
+┗ \`${PREFIX}menu\` - Show menu
+
+📥 *DOWNLOADER (NEXA VDL)*
+┣ \`${PREFIX}yt\` - YouTube Video
+┣ \`${PREFIX}song\` - YouTube Audio (MP3)
+┣ \`${PREFIX}fb\` - Facebook Video
+┣ \`${PREFIX}ig\` - Instagram Reels/Video
+┗ \`${PREFIX}tt\` - TikTok (No Watermark)
 
 🛡️ *GROUP TOOLS*
-┣ \`${PREFIX}tagall\` - Summon all members
-┣ \`${PREFIX}groupinfo\` - Detailed group stats
-┣ \`${PREFIX}link\` - Get group invite link
-┣ \`${PREFIX}mute\` - Admins only mode
-┗ \`${PREFIX}unmute\` - Open group chat
+┣ \`${PREFIX}tagall\` - Summon all
+┣ \`${PREFIX}groupinfo\` - Group stats
+┣ \`${PREFIX}link\` - Invite link
+┗ \`${PREFIX}mute\` / \`${PREFIX}unmute\`
 
-🎨 *CREATIVE & FUN*
+🎨 *FUN & TOOLS*
 ┣ \`${PREFIX}sticker\` - Image to sticker
-┣ \`${PREFIX}joke\` - Get a random laugh
-┣ \`${PREFIX}quote\` - Daily inspiration
-┣ \`${PREFIX}weather\` - Check city weather
-┗ \`${PREFIX}wiki\` - Search Wikipedia
-
-🔍 *SEARCH TOOLS*
-┣ \`${PREFIX}image\` - Search high-res images
-┗ \`${PREFIX}gif\` - Find the perfect GIF
+┣ \`${PREFIX}joke\` - Random laugh
+┣ \`${PREFIX}quote\` - Inspiration
+┗ \`${PREFIX}wiki\` - Search Wiki
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 _“Efficiency in every message.”_`;
@@ -96,81 +159,51 @@ async function handleCommand(sock, msg) {
 
       case "ping":
         const start = Date.now();
-        await reply(sock, msg, "🚀 *Analyzing system latency...*");
-        await reply(sock, msg, `✅ *Nexora is running smooth!*\n⚡ *Latency:* ${Date.now() - start}ms`);
+        await reply(sock, msg, `✅ *Pong!*\n⚡ *Latency:* ${Date.now() - start}ms`);
         break;
 
       case "alive":
-        const uptime = process.uptime();
-        const h = Math.floor(uptime / 3600);
-        const m = Math.floor((uptime % 3600) / 60);
-        const s = Math.floor(uptime % 60);
-        await reply(sock, msg, 
-          `🌟 *NEXORA MINI IS ACTIVE* 🌟\n\n` +
-          `📡 *Status:* Fully Operational\n` +
-          `⏱️ *Uptime:* ${h}h ${m}m ${s}s\n` +
-          `💻 *Platform:* Render Cloud\n` +
-          `🛡️ *Identity:* Safari (macOS)\n\n` +
-          `_I am ready to assist you!_`
-        );
+        await reply(sock, msg, `🌟 *NEXORA MINI IS ACTIVE* 🌟\n📡 *Status:* Fully Operational\n💻 *Platform:* Render Cloud\n🛡️ *Identity:* Safari (macOS)`);
         break;
 
-      case "owner":
-        await reply(sock, msg, `👑 *MY CREATOR*\n\nHello! I was built by *Shadow Dev*. You can reach him here:\n\n📱 *WhatsApp:* wa.me/${OWNER}\n✨ *Project:* Nexora Bot Mini`);
+      case "yt":
+      case "fb":
+      case "ig":
+      case "tt":
+        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}${cmd} <link>`);
+        await downloadMedia(sock, msg, text, "video");
         break;
 
-      case "joke":
-        try {
-          const res = await axios.get("https://official-joke-api.appspot.com/random_joke");
-          await reply(sock, msg, `😂 *Here is a joke for you!*\n\n*Q:* ${res.data.setup}\n*A:* ${res.data.punchline}`);
-        } catch {
-          await reply(sock, msg, "😂 *Classic Joke:* Why did the web developer walk out of a restaurant? Because of the table layout!");
-        }
-        break;
-
-      case "quote":
-        try {
-          const res = await axios.get("https://api.quotable.io/random");
-          await reply(sock, msg, `💭 *Daily Inspiration*\n\n"${res.data.content}"\n\n— _${res.data.author}_`);
-        } catch {
-          await reply(sock, msg, "💭 *Inspiration:* The best way to predict the future is to create it.");
-        }
-        break;
-
-      case "wiki":
-        if (!text) return reply(sock, msg, "🔍 *Please provide a topic to search!*");
-        try {
-          const res = await axios.get(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(text)}`);
-          await reply(sock, msg, `📚 *WIKIPEDIA: ${res.data.title}*\n\n${res.data.extract}`);
-        } catch {
-          await reply(sock, msg, "❌ *Sorry, I couldn't find any information on that topic.*");
-        }
+      case "song":
+      case "mp3":
+        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}${cmd} <link/search>`);
+        // For now, simple URL handling. Could add search later.
+        await downloadMedia(sock, msg, text, "audio");
         break;
 
       case "sticker":
       case "s":
         const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         const img = quoted?.imageMessage || msg.message?.imageMessage;
-        if (!img) return reply(sock, msg, "🎨 *Please reply to an image to create a sticker!*");
-        await reply(sock, msg, "⏳ *Converting image to sticker, please wait...*");
+        if (!img) return reply(sock, msg, "🎨 *Reply to an image to create a sticker!*");
+        await reply(sock, msg, "⏳ *Converting...*");
         try {
           const buf = await urlToBuffer(img.url);
           await sock.sendMessage(jid, { sticker: buf }, { quoted: msg });
         } catch (e) {
-          await reply(sock, msg, "❌ *Sticker creation failed. Please try again with a different image.*");
+          await reply(sock, msg, "❌ *Sticker failed.*");
         }
         break;
 
       case "tagall":
-        if (!jid.endsWith("@g.us")) return reply(sock, msg, "❌ *This command only works in groups!*");
+        if (!jid.endsWith("@g.us")) return reply(sock, msg, "❌ *Groups only!*");
         const meta = await sock.groupMetadata(jid);
         const members = meta.participants.map(p => p.id);
-        const mentionText = `📢 *NEXORA SUMMONS EVERYONE!*\n\n` + (text ? `💬 *Message:* ${text}\n\n` : "") + members.map(m => `@${m.split("@")[0]}`).join(" ");
+        const mentionText = `📢 *SUMMONING EVERYONE!*\n\n` + (text ? `💬 *Message:* ${text}\n\n` : "") + members.map(m => `@${m.split("@")[0]}`).join(" ");
         await sock.sendMessage(jid, { text: mentionText, mentions: members }, { quoted: msg });
         break;
 
       default:
-        // Silently ignore unknown commands
         break;
     }
   } catch (err) {

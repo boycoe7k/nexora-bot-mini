@@ -38,12 +38,15 @@ const status = {
   lastUpdate: new Date().toISOString(),
 };
 
+let globalSock = null;
+
 function setStatus(patch) {
   Object.assign(status, patch, { lastUpdate: new Date().toISOString() });
 }
 
-// ─── Web Dashboard (Knight Bot style) ───
+// ─── Web Dashboard ───
 const app = express();
+app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 async function buildQrSvg(qrString) {
@@ -62,7 +65,6 @@ app.get("/", (req, res) => {
   <meta charset="utf-8">
   <title>${BOT_NAME} | Pair Code</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="10">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     body {
@@ -131,11 +133,14 @@ app.get("/", (req, res) => {
       background: #000; color: #fff; font-weight: 600; cursor: pointer;
       margin-bottom: 15px; font-size: 15px;
     }
+    .btn-main:disabled { background: #ccc; cursor: not-allowed; }
+
     .display-box {
       background: #f1f3f5; padding: 15px; border-radius: 10px; margin-bottom: 15px;
       font-weight: 600; font-size: 16px; color: #555; min-height: 20px;
     }
     .code-text { color: #000; letter-spacing: 2px; font-size: 18px; }
+    
     .btn-copy {
       width: 100%; padding: 12px; border-radius: 10px; border: 1px solid #ddd;
       background: #fff; color: #000; font-weight: 600; cursor: pointer; font-size: 15px;
@@ -147,7 +152,6 @@ app.get("/", (req, res) => {
 
     footer { margin-top: 30px; font-size: 12px; color: #aaa; }
     
-    /* Status Badge */
     .status-badge {
       display: inline-block; padding: 4px 10px; border-radius: 12px;
       font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 10px;
@@ -179,18 +183,18 @@ app.get("/", (req, res) => {
     <div id="pair-section">
       <div class="input-group">
         <label>Enter your WhatsApp number with country code</label>
-        <input type="text" value="${process.env.OWNER_NUMBER || ''}" readonly placeholder="+263716808196">
+        <input type="text" id="phone-input" placeholder="+263716808196">
       </div>
-      <button class="btn-main" onclick="location.reload()"><i class="fas fa-sync-alt"></i> Refresh Code</button>
-      <div class="display-box">
-        ${status.pairingCode ? `<span class="code-text">${status.pairingCode}</span>` : 'Your pair code will appear here'}
+      <button class="btn-main" id="gen-btn" onclick="generatePairCode()"><i class="fas fa-key"></i> Generate Pair Code</button>
+      <div class="display-box" id="code-box">
+        Your pair code will appear here
       </div>
       <button class="btn-copy" onclick="copyCode()"><i class="fas fa-copy"></i> Copy Code</button>
     </div>
 
     <div id="qr-section" class="qr-container">
-      <div class="qr-svg">
-        ${status.qrCodeSvg || '<p style="padding: 20px; color: #888;">Waiting for QR code...</p>'}
+      <div class="qr-svg" id="qr-box">
+        <p style="padding: 20px; color: #888;">Waiting for QR code...</p>
       </div>
       <p class="subtitle" style="margin-top: 15px;">Scan this QR with WhatsApp Linked Devices</p>
     </div>
@@ -217,20 +221,85 @@ app.get("/", (req, res) => {
         qrSec.classList.add('active');
         pairBtn.classList.remove('active');
         qrBtn.classList.add('active');
+        fetchStatus();
       }
     }
     
+    async function generatePairCode() {
+      const phone = document.getElementById('phone-input').value.replace(/[^0-9]/g, '');
+      if (!phone) return alert('Please enter a valid number!');
+      
+      const btn = document.getElementById('gen-btn');
+      const box = document.getElementById('code-box');
+      
+      btn.disabled = true;
+      box.innerText = 'Generating...';
+      
+      try {
+        const res = await fetch('/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone })
+        });
+        const data = await res.json();
+        if (data.code) {
+          box.innerHTML = '<span class="code-text">' + data.code + '</span>';
+        } else {
+          box.innerText = 'Error: ' + (data.error || 'Failed to generate');
+          btn.disabled = false;
+        }
+      } catch (e) {
+        box.innerText = 'Error connecting to server';
+        btn.disabled = false;
+      }
+    }
+
     function copyCode() {
-      const code = "${status.pairingCode || ''}";
-      if (!code) return;
+      const box = document.getElementById('code-box');
+      const code = box.innerText.trim();
+      if (code.includes('appear') || code.includes('Generating')) return;
       navigator.clipboard.writeText(code).then(() => alert('Code copied!'));
     }
+
+    async function fetchStatus() {
+      const res = await fetch('/status');
+      const data = await res.json();
+      if (data.qrCodeSvg) {
+        document.getElementById('qr-box').innerHTML = data.qrCodeSvg;
+      }
+    }
+
+    setInterval(async () => {
+      const res = await fetch('/status');
+      const data = await res.json();
+      if (data.connection === 'connected') location.reload();
+      if (document.getElementById('qr-section').classList.contains('active') && data.qrCodeSvg) {
+        document.getElementById('qr-box').innerHTML = data.qrCodeSvg;
+      }
+    }, 5000);
   </script>
 </body>
 </html>`);
 });
 
 app.get("/status", (req, res) => res.json(status));
+
+app.post("/api/pair", async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ error: "Phone number required" });
+  if (!globalSock) return res.status(500).json({ error: "Bot not initialized" });
+
+  try {
+    console.log(chalk.yellow(`\nWeb request for code: ${phone}`));
+    await new Promise((r) => setTimeout(r, 2000));
+    const code = await globalSock.requestPairingCode(phone);
+    const fmt = code.match(/.{1,4}/g).join("-");
+    setStatus({ pairingCode: fmt });
+    res.json({ code: fmt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get("/reset", (req, res) => {
   if (fs.existsSync(SESSION_DIR)) fs.rmSync(SESSION_DIR, { recursive: true, force: true });
@@ -254,19 +323,6 @@ function printBanner() {
   console.log();
 }
 
-async function askPhoneNumber() {
-  const fromEnv = (process.env.OWNER_NUMBER || "").replace(/[^0-9]/g, "");
-  if (fromEnv) return fromEnv;
-  
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    rl.question(chalk.green("Enter WhatsApp number (e.g. 263716808196): "), (answer) => {
-      rl.close();
-      resolve(answer.trim().replace(/[^0-9]/g, ""));
-    });
-  });
-}
-
 async function startBot() {
   printBanner();
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
@@ -281,6 +337,8 @@ async function startBot() {
     markOnlineOnConnect: false,
   });
 
+  globalSock = sock;
+
   if (!sock.authState.creds.registered) {
     setStatus({ connection: "pairing" });
     
@@ -294,19 +352,8 @@ async function startBot() {
       qrcodeTerminal.generate(qr, { small: true });
     };
     sock.ev.on("connection.update", qrListener, { unregister: true });
-
-    const phoneNumber = await askPhoneNumber();
-    console.log(chalk.yellow(`\nRequesting code for: ${phoneNumber}`));
-    await new Promise((r) => setTimeout(r, 5000));
     
-    try {
-      const code = await sock.requestPairingCode(phoneNumber);
-      const fmt = code.match(/.{1,4}/g).join("-");
-      setStatus({ pairingCode: fmt });
-      console.log("\n" + chalk.bgGreen.black.bold(`  PAIRING CODE: ${fmt}  `) + "\n");
-    } catch (err) {
-      console.error(chalk.red("Pairing failed: " + err.message));
-    }
+    console.log(chalk.cyan("Waiting for pairing request from web dashboard..."));
   }
 
   sock.ev.on("connection.update", async (update) => {
