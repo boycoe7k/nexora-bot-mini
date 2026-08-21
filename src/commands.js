@@ -3,6 +3,7 @@ const fs = require("fs");
 
 const PREFIX = ".";
 const BOT_NAME = "Nexora Bot Mini";
+const AUTHOR = "Boycoe-dev";
 const MENU_IMAGE = "https://ibb.co/TB8XpF2T";
 const OWNER = process.env.OWNER_NUMBER || "263716808196";
 
@@ -27,7 +28,7 @@ async function urlToBuffer(url) {
 }
 
 async function reply(sock, msg, text) {
-  await sock.sendMessage(msg.key.remoteJid, { text: `*「 ${BOT_NAME} 」*\n\n${text}\n\n_Powered by Shadow Dev_` }, { quoted: msg });
+  await sock.sendMessage(msg.key.remoteJid, { text: `*「 ${BOT_NAME} 」*\n\n${text}\n\n_By ${AUTHOR}_` }, { quoted: msg });
 }
 
 async function react(sock, msg, emoji) {
@@ -90,7 +91,7 @@ async function searchYouTubeWithButtons(sock, msg, query) {
     const topResult = res.data[0];
     const caption = `📥 *NEXORA DOWNLOADER*\n\n📌 *Title:* ${topResult.title.slice(0, 60)}\n🌐 *Platform:* YouTube\n🔗 *URL:* ${topResult.url}\n\n_Select an option below:_`;
     const buttons = [{ buttonId: `dl_video|${topResult.url}`, buttonText: { displayText: "🎥 Video" }, type: 1 }, { buttonId: `dl_audio|${topResult.url}`, buttonText: { displayText: "🎵 Audio" }, type: 1 }];
-    await sock.sendMessage(jid, { image: { url: topResult.thumbnail }, caption, footer: `Nexora Bot Mini`, buttons, headerType: 4 }, { quoted: msg });
+    await sock.sendMessage(jid, { image: { url: topResult.thumbnail }, caption, footer: `Nexora Bot Mini By ${AUTHOR}`, buttons, headerType: 4 }, { quoted: msg });
   } catch (err) { await reply(sock, msg, `❌ *Search failed:* ${err.message}`); }
 }
 
@@ -102,7 +103,7 @@ function buildMenu(pushName, runtime) {
 │ ➻ *MODE:* Public
 │ ➻ *ACTIVE BOTS:* 1
 │ ➻ *TOTAL CMDS:* 206+
-│ ➻ *DEV:* SHADOW DEV
+│ ➻ *DEV:* ${AUTHOR.toUpperCase()}
 │
 └───────────────┈ ➻
 
@@ -110,7 +111,6 @@ function buildMenu(pushName, runtime) {
 ┣ \`${PREFIX}gcstatus\`
 ┣ \`${PREFIX}vv\`
 ┣ \`${PREFIX}kick\`
-┣ \`${PREFIX}kickall\`
 ┣ \`${PREFIX}add\`
 ┣ \`${PREFIX}promote\`
 ┣ \`${PREFIX}demote\`
@@ -141,19 +141,16 @@ function buildMenu(pushName, runtime) {
 ┗ \`${PREFIX}wiki\`
 
 ━━━━━━━━━━━━━━━━━━━━
-_“Efficiency in every message.”_`;
+_“Nexora Bot Mini By ${AUTHOR}”_`;
 }
 
 // ── Main Handler ──────────────────────────────────────────────────────────────
 async function handleCommand(sock, msg, { startTime, settings }) {
   try {
     const jid = msg.key.remoteJid;
-    const sender = msg.key.participant || jid;
-    const pushName = msg.pushName || "User";
     const rawText = getMessageText(msg).trim();
     const isGroup = jid.endsWith("@g.us");
 
-    // Button Responses
     if (rawText.startsWith("dl_video|") || rawText.startsWith("dl_audio|")) {
       const [type, url] = rawText.split("|");
       await react(sock, msg, "🚀");
@@ -169,43 +166,31 @@ async function handleCommand(sock, msg, { startTime, settings }) {
 
     switch (cmd) {
       case "menu":
-        const menu = buildMenu(pushName, getRuntime(startTime));
+        const menu = buildMenu(msg.pushName || "User", getRuntime(startTime));
         try {
           const buf = await urlToBuffer(MENU_IMAGE);
           await sock.sendMessage(jid, { image: buf, caption: menu }, { quoted: msg });
         } catch { await reply(sock, msg, menu); }
         break;
 
-      // ── Group Manager ──
       case "gcstatus":
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
         const gMeta = await sock.groupMetadata(jid);
-        reply(sock, msg, `📊 *GROUP STATUS*\n\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}\n👑 *Admins:* ${gMeta.participants.filter(p => p.admin).length}`);
+        reply(sock, msg, `📊 *GROUP STATUS*\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}`);
         break;
 
       case "vv":
-        const q = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        const viewOnce = q?.viewOnceMessageV2 || q?.viewOnceMessage;
-        if (!viewOnce) return reply(sock, msg, "❌ *Reply to a view-once message!*");
-        // Simplified VV implementation
         reply(sock, msg, "✅ *Anti-ViewOnce Triggered!*");
         break;
 
       case "kick":
-        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message?.extendedTextMessage?.contextInfo?.participant;
-        if (!target) return reply(sock, msg, "❌ *Tag someone to kick!*");
-        await sock.groupParticipantsUpdate(jid, [target], "remove");
-        reply(sock, msg, "✅ *User kicked.*");
-        break;
-
       case "promote":
       case "demote":
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const pTarget = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message?.extendedTextMessage?.contextInfo?.participant;
-        if (!pTarget) return reply(sock, msg, `❌ *Tag someone to ${cmd}!*`);
-        await sock.groupParticipantsUpdate(jid, [pTarget], cmd);
-        reply(sock, msg, `✅ *User ${cmd}d.*`);
+        const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message?.extendedTextMessage?.contextInfo?.participant;
+        if (!target) return reply(sock, msg, `❌ *Tag someone to ${cmd}!*`);
+        await sock.groupParticipantsUpdate(jid, [target], cmd === "kick" ? "remove" : cmd);
+        reply(sock, msg, `✅ *Action ${cmd} completed.*`);
         break;
 
       case "mute":
@@ -213,12 +198,6 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
         await sock.groupSettingUpdate(jid, cmd === "mute" ? "announcement" : "not_announcement");
         reply(sock, msg, `✅ *Group ${cmd}d.*`);
-        break;
-
-      case "link":
-        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const code = await sock.groupInviteCode(jid);
-        reply(sock, msg, `🔗 *Invite Link:* https://chat.whatsapp.com/${code}`);
         break;
 
       case "tag":
@@ -229,7 +208,6 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         await sock.sendMessage(jid, { text: `📢 *SUMMONING EVERYONE!*\n\n${text || ""}\n\n` + members.map(m => `@${m.split("@")[0]}`).join(" "), mentions: members }, { quoted: msg });
         break;
 
-      // ── Settings ──
       case "autoreact":
       case "autostatus":
       case "antibadword":
@@ -247,7 +225,6 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         reply(sock, msg, sText);
         break;
 
-      // ── Downloader ──
       case "vid":
         if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}vid <video name>`);
         const vUrl = extractUrl(text);
