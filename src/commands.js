@@ -120,6 +120,19 @@ async function searchYouTube(sock, msg, query) {
   }
 }
 
+async function searchAndDownload(sock, msg, query, type = "video") {
+  try {
+    await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
+    const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
+    if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
+
+    const topResult = res.data[0];
+    await downloadMedia(sock, msg, topResult.url, type);
+  } catch (err) {
+    await reply(sock, msg, `❌ *Search failed:* ${err.message}`);
+  }
+}
+
 function buildMenu(pushName) {
   const time = new Date().toLocaleTimeString("en-US", { hour12: true });
   return `✨ *WELCOME TO NEXORA MINI* ✨
@@ -138,11 +151,12 @@ function buildMenu(pushName) {
 
 📥 *DOWNLOADER (NEXA VDL)*
 ┣ \`${PREFIX}yts\` - YouTube Search
-┣ \`${PREFIX}yt\` - YouTube Video
-┣ \`${PREFIX}song\` - YouTube Audio (MP3)
-┣ \`${PREFIX}fb\` - Facebook Video
-┣ \`${PREFIX}ig\` - Instagram Reels/Video
-┗ \`${PREFIX}tt\` - TikTok (No Watermark)
+┣ \`${PREFIX}vid\` - Search & Download Video
+┣ \`${PREFIX}song\` - Search & Download Audio
+┣ \`${PREFIX}yt\` - YouTube Link Downloader
+┣ \`${PREFIX}fb\` - Facebook Downloader
+┣ \`${PREFIX}ig\` - Instagram Downloader
+┗ \`${PREFIX}tt\` - TikTok Downloader
 
 🛡️ *GROUP TOOLS*
 ┣ \`${PREFIX}tagall\` - Summon all
@@ -201,6 +215,27 @@ async function handleCommand(sock, msg) {
         await searchYouTube(sock, msg, text);
         break;
 
+      case "vid":
+        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}vid <video name>`);
+        const vidUrl = extractUrl(text);
+        if (vidUrl) {
+          await downloadMedia(sock, msg, vidUrl, "video");
+        } else {
+          await searchAndDownload(sock, msg, text, "video");
+        }
+        break;
+
+      case "song":
+      case "mp3":
+        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}song <song name>`);
+        const songUrl = extractUrl(text);
+        if (songUrl) {
+          await downloadMedia(sock, msg, songUrl, "audio");
+        } else {
+          await searchAndDownload(sock, msg, text, "audio");
+        }
+        break;
+
       case "yt":
       case "fb":
       case "ig":
@@ -208,28 +243,6 @@ async function handleCommand(sock, msg) {
         const url = extractUrl(text);
         if (!url) return reply(sock, msg, `❌ *Please provide a valid link!*`);
         await downloadMedia(sock, msg, url, "video");
-        break;
-
-      case "song":
-      case "mp3":
-        const songUrl = extractUrl(text);
-        if (songUrl) {
-          await downloadMedia(sock, msg, songUrl, "audio");
-        } else if (text) {
-          // If no URL but text exists, search first
-          try {
-            const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(text)}`, { headers });
-            if (res.data && res.data.length) {
-              await downloadMedia(sock, msg, res.data[0].url, "audio");
-            } else {
-              await reply(sock, msg, "❌ *No results found.*");
-            }
-          } catch (e) {
-            await reply(sock, msg, `❌ *Search failed:* ${e.message}`);
-          }
-        } else {
-          await reply(sock, msg, `❌ *Usage:* ${PREFIX}${cmd} <link/search query>`);
-        }
         break;
 
       case "sticker":
