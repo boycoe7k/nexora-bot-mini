@@ -1,7 +1,7 @@
 {
-  "name": "shadow-whatsapp-bot",
+  "name": "nexora-bot-mini",
   "version": "1.0.0",
-  "description": "Shadow Bot - WhatsApp Multi-Device Bot with Pairing Code Auth",
+  "description": "Nexora Bot Mini - Professional WhatsApp Bot with Management & Downloader Tools",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -12,6 +12,7 @@
     "@whiskeysockets/baileys": "^6.7.23",
     "axios": "^1.6.8",
     "chalk": "^4.1.2",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "figlet": "^1.7.0",
     "pino": "^8.19.0",
@@ -25,7 +26,8 @@
     "whatsapp",
     "bot",
     "baileys",
-    "multi-device"
+    "multi-device",
+    "nexora"
   ],
   "author": "Shadow Dev",
   "license": "MIT",

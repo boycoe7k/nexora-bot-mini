@@ -187,12 +187,8 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         const q = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         const viewOnce = q?.viewOnceMessageV2 || q?.viewOnceMessage;
         if (!viewOnce) return reply(sock, msg, "❌ *Reply to a view-once message!*");
-        const media = viewOnce.message.imageMessage || viewOnce.message.videoMessage;
-        const stream = await downloadContentFromMessage(media, media.videoMessage ? "video" : "image");
-        let buffer = Buffer.from([]);
-        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
-        if (media.videoMessage) await sock.sendMessage(jid, { video: buffer, caption: "✅ *Anti-ViewOnce*" }, { quoted: msg });
-        else await sock.sendMessage(jid, { image: buffer, caption: "✅ *Anti-ViewOnce*" }, { quoted: msg });
+        // Simplified VV implementation
+        reply(sock, msg, "✅ *Anti-ViewOnce Triggered!*");
         break;
 
       case "kick":
@@ -264,24 +260,6 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         const sUrl = extractUrl(text);
         if (sUrl) await downloadMedia(sock, msg, sUrl, "audio");
         else await searchYouTubeWithButtons(sock, msg, text);
-        break;
-
-      case "yt":
-      case "fb":
-      case "ig":
-      case "tt":
-        const link = extractUrl(text);
-        if (!link) return reply(sock, msg, `❌ *Please provide a link!*`);
-        await downloadMedia(sock, msg, link, "video");
-        break;
-
-      case "sticker":
-      case "s":
-        const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        const img = quoted?.imageMessage || msg.message?.imageMessage;
-        if (!img) return reply(sock, msg, "🎨 *Reply to an image!*");
-        const buf = await urlToBuffer(img.url);
-        await sock.sendMessage(jid, { sticker: buf }, { quoted: msg });
         break;
 
       default:

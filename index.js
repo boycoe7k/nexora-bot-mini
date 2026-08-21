@@ -7,6 +7,7 @@ const {
   fetchLatestBaileysVersion,
   jidDecode,
   downloadContentFromMessage,
+  proto,
 } = require("@whiskeysockets/baileys");
 
 const pino = require("pino");
@@ -28,7 +29,7 @@ const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Shadow Dev";
 const startTime = Date.now();
 
-// ─── Settings State (In-memory for now) ───
+// ─── Settings State (In-memory) ───
 const settings = {
   autoreact: false,
   autostatus: true,
@@ -37,6 +38,9 @@ const settings = {
   antidelete: false,
   anticall: false,
 };
+
+// ─── Message Store (for Anti-Delete) ───
+const messageStore = {};
 
 // ─── Status State ───
 const status = {
@@ -84,7 +88,7 @@ app.get("/", (req, res) => {
     .bot-icon { background: #000; color: #fff; width: 80px; height: 80px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 40px; margin: 0 auto 20px; }
     h1 { font-size: 24px; margin: 0 0 5px; font-weight: 700; }
     .subtitle { color: #888; font-size: 14px; margin-bottom: 25px; }
-    .social-icons { display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
+    . social-icons { display: flex; justify-content: center; gap: 15px; margin-bottom: 30px; }
     .social-icons a { width: 40px; height: 40px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: #fff; text-decoration: none; font-size: 18px; }
     .btn-yt { background: #ff0000; }
     .btn-tg { background: #0088cc; }
@@ -264,21 +268,53 @@ async function startBot() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // ── Auto Status View ──
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
     for (const msg of messages) {
       if (!msg.message) continue;
       
-      // Auto-Status
-      if (settings.autostatus && msg.key.remoteJid === "status@broadcast") {
+      const jid = msg.key.remoteJid;
+      const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
+
+      // ── Anti-Delete Store ──
+      if (settings.antidelete && !msg.key.fromMe) {
+        messageStore[msg.key.id] = msg;
+      }
+
+      // ── Auto-Status ──
+      if (settings.autostatus && jid === "status@broadcast") {
         await sock.readMessages([msg.key]);
       }
 
-      // Handle Anti-Delete (Store messages in memory for now)
-      // Implementation omitted for brevity but logic would go here
+      // ── Anti-Link ──
+      if (settings.antilink && isGroup(jid) && text.includes("chat.whatsapp.com")) {
+        const groupMeta = await sock.groupMetadata(jid);
+        const isAdmin = groupMeta.participants.find(p => p.id === msg.key.participant)?.admin;
+        if (!isAdmin && !msg.key.fromMe) {
+          await sock.sendMessage(jid, { delete: msg.key });
+          await sock.groupParticipantsUpdate(jid, [msg.key.participant], "remove");
+          await sock.sendMessage(jid, { text: `⚠️ *Anti-Link Active:* @${msg.key.participant.split("@")[0]} was removed for sharing a group link.`, mentions: [msg.key.participant] });
+        }
+      }
 
       await handleCommand(sock, msg, { startTime, settings });
+    }
+  });
+
+  // ── Anti-Delete Logic ──
+  sock.ev.on("messages.update", async (updates) => {
+    if (!settings.antidelete) return;
+    for (const update of updates) {
+      if (update.update.protocolMessage?.type === 0) { // Message deleted
+        const deletedId = update.update.protocolMessage.key.id;
+        const oldMsg = messageStore[deletedId];
+        if (oldMsg) {
+          const jid = oldMsg.key.remoteJid;
+          const sender = oldMsg.key.participant || jid;
+          await sock.sendMessage(jid, { text: `🛡️ *Anti-Delete Active*\n\n👤 *Sender:* @${sender.split("@")[0]}\n🕒 *Time:* ${new Date().toLocaleTimeString()}\n\n*Message:*`, mentions: [sender] });
+          await sock.copyNForward(jid, oldMsg, false);
+        }
+      }
     }
   });
 
@@ -295,5 +331,7 @@ async function startBot() {
 
   return sock;
 }
+
+function isGroup(jid) { return jid.endsWith("@g.us"); }
 
 startBot().catch(err => console.error("FATAL:", err));
