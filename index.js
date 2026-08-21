@@ -49,7 +49,7 @@ const status = {
   qrCodeSvg: null,
   botName: null,
   botId: null,
-  browser: "Chrome (Linux)",
+  browser: "Chrome (Windows)",
   lastUpdate: new Date().toISOString(),
 };
 
@@ -87,7 +87,6 @@ app.get("/", (req, res) => {
     .bot-icon { background: #000; color: #fff; width: 80px; height: 80px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 40px; margin: 0 auto 20px; }
     h1 { font-size: 24px; margin: 0 0 5px; font-weight: 700; }
     .subtitle { color: #888; font-size: 14px; margin-bottom: 25px; }
-    
     .tabs { display: flex; background: #f1f3f5; border-radius: 10px; padding: 5px; margin-bottom: 25px; }
     .tab { flex: 1; padding: 10px; border-radius: 8px; cursor: pointer; border: none; font-weight: 600; font-size: 14px; background: transparent; color: #555; }
     .tab.active { background: #000; color: #fff; }
@@ -115,12 +114,10 @@ app.get("/", (req, res) => {
     <div class="status-badge status-${status.connection}">${status.connection}</div>
     <h1>${BOT_NAME}</h1>
     <p class="subtitle">Link your WhatsApp device</p>
-
     <div class="tabs">
       <button class="tab active" id="tab-btn-pair" onclick="switchTab('pair')"><i class="fas fa-key"></i> Pair Code</button>
       <button class="tab" id="tab-btn-qr" onclick="switchTab('qr')"><i class="fas fa-qrcode"></i> QR Code</button>
     </div>
-
     <div id="pair-section">
       <div class="input-group">
         <label>Enter your WhatsApp number with country code</label>
@@ -130,12 +127,10 @@ app.get("/", (req, res) => {
       <div class="display-box" id="code-box">Your pair code will appear here</div>
       <button class="btn-copy" onclick="copyCode()"><i class="fas fa-copy"></i> Copy Code</button>
     </div>
-
     <div id="qr-section" class="qr-container">
       <div class="qr-svg" id="qr-box"><p style="padding: 20px; color: #888;">Waiting for QR code...</p></div>
       <p class="subtitle" style="margin-top: 15px;">Scan this QR with WhatsApp Linked Devices</p>
     </div>
-
     <footer>&copy; 2026 ${AUTHOR} | ${BOT_NAME}</footer>
   </div>
   <script>
@@ -220,12 +215,12 @@ async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState(SESSION_DIR);
   const { version } = await fetchLatestBaileysVersion();
 
-  // Switch to a more universal browser identity for better linking compatibility
+  // Switch to Windows Chrome for maximum linking compatibility
   const sock = makeWASocket({
     version,
     logger: pino({ level: "silent" }),
     auth: state,
-    browser: ["Ubuntu", "Chrome", "110.0.5481.177"],
+    browser: ["Windows", "Chrome", "110.0.5481.177"],
     syncFullHistory: false,
     markOnlineOnConnect: false,
   });
@@ -265,13 +260,10 @@ async function startBot() {
     if (type !== "notify") return;
     for (const msg of messages) {
       if (!msg.message) continue;
-      
       const jid = msg.key.remoteJid;
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
-
       if (settings.antidelete && !msg.key.fromMe) messageStore[msg.key.id] = msg;
       if (settings.autostatus && jid === "status@broadcast") await sock.readMessages([msg.key]);
-
       if (settings.antilink && jid.endsWith("@g.us") && text.includes("chat.whatsapp.com")) {
         const groupMeta = await sock.groupMetadata(jid);
         const isAdmin = groupMeta.participants.find(p => p.id === msg.key.participant)?.admin;
@@ -280,7 +272,6 @@ async function startBot() {
           await sock.groupParticipantsUpdate(jid, [msg.key.participant], "remove");
         }
       }
-
       await handleCommand(sock, msg, { startTime, settings });
     }
   });
