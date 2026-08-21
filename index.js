@@ -48,7 +48,7 @@ function buildQrSvg(qrString, size = 300) {
   const rects = [];
   lines.forEach((line, y) => {
     for (let x = 0; x < line.length; x++) {
-      if (line[x] === "\u2588") rects.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
+      if (line[x] === "█") rects.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
     }
   });
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${width} ${width}" shape-rendering="crispEdges"><rect width="${width}" height="${width}" fill="#ffffff"/>${rects.join("")}</svg>`;
