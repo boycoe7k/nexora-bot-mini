@@ -20,7 +20,14 @@ const headers = {
 };
 
 // Initialize OpenAI for AI commands
-const openai = new OpenAI();
+let openai;
+try {
+  if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+} catch (e) {
+  console.error("OpenAI Init Error:", e.message);
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getMessageText(msg) {
@@ -125,6 +132,9 @@ _Or search for something else._`;
 
 // ── AI Logic ──
 async function handleAI(sock, msg, prompt) {
+    if (!openai) {
+        return reply(sock, msg, "❌ *AI Error:* OpenAI API Key is missing. Please set `OPENAI_API_KEY` in your Render environment variables to enable AI commands.");
+    }
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o",
