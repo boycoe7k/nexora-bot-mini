@@ -4,7 +4,7 @@ const fs = require("fs");
 const PREFIX = ".";
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Boycoe-dev";
-const MENU_IMAGE = "https://ibb.co/TB8XpF2T";
+const MENU_IMAGE = "https://i.ibb.co/JR7L0Mtd/4eb100a2-65ed-4607-8b68-26280d75f6b9.jpg";
 const OWNER = process.env.OWNER_NUMBER || "263781021754";
 
 // ── API Configs ──
