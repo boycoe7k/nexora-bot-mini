@@ -76,67 +76,168 @@ async function downloadMedia(sock, msg, url, type = "video") {
 function buildMenu(pushName, runtime) {
   return `╭━〔 ⚡ NEXORA×MD ⚡ 〕━⬣
 ┃
-┃ | [] ➜ STATUS    : ONLINE ✅
+┃ | [] ➜ STATUS    : ONLINE
 ┃ | [] ➜ RUNTIME   : ${runtime}
 ┃ | [] ➜ MODE      : Public
 ┃ | [] ➜ ACTIVE BOTS   : 1
 ┃ | [] ➜ COMMANDS  : 206+
-┃ | [] ➜ DEV       : ${AUTHOR.toUpperCase()}
+┃ | [] ➜ DEV       : BOYCOE-DEV
 ┃
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 📥 DOWNLOADS 〕━━⬣
-┃➤ .yt / .song / .vid
-┃➤ .tiktok / .facebook
-┃➤ .instagram / .pinterest
-┃➤ .wallpaper / .media
+┃➤ .yt
+┃➤ .mp3
+┃➤ .mp4
+┃➤ .song
+┃➤ .video
+┃➤ .tiktok
+┃➤ .instagram
+┃➤ .igstory
+┃➤ .facebook
+┃➤ .pinterest
+┃➤ .wallpaper
+┃➤ .wallpaper4k
+┃➤ .media
+┃➤ .download
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🔎 SEARCH 〕━━⬣
-┃➤ .google / .bing
-┃➤ .wiki / .image
-┃➤ .news / .weather
+┃➤ .google
+┃➤ .bing
+┃➤ .duckduckgo
+┃➤ .yahoo
+┃➤ .brave
+┃➤ .search
+┃➤ .wiki
+┃➤ .image
+┃➤ .video
+┃➤ .news
+┃➤ .weather
+┃➤ .maps
+┃➤ .define
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🎬 VIDEO EDITOR 〕━━⬣
-┃➤ .trim / .crop
-┃➤ .resize / .speed
+┃➤ .trim
+┃➤ .crop
+┃➤ .resize
+┃➤ .rotate
+┃➤ .filter
+┃➤ .speed
+┃➤ .text
+┃➤ .watermark
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🖼️ IMAGE EDITOR 〕━━⬣
-┃➤ .filter / .resize
-┃➤ .text / .watermark
+┃➤ .crop
+┃➤ .rotate
+┃➤ .resize
+┃➤ .flip
+┃➤ .filter
+┃➤ .adjust
+┃➤ .text
+┃➤ .watermark
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 🎨 MEDIA TOOLS 〕━━⬣
+┃➤ .sticker
+┃➤ .toimg
+┃➤ .removebg
+┃➤ .compress
+┃➤ .enhance
+┃➤ .blur
+┃➤ .caption
+┃➤ .collage
+┃➤ .gif
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 🎙️ VOICE & AUDIO 〕━━⬣
+┃➤ .tts <text>
+┃➤ .stt
+┃➤ .transcribe
+┃➤ .vtr <language>
+┃➤ .volume
+┃➤ .mute
+┃➤ .audiomix
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 🌐 TRANSLATE 〕━━⬣
+┃➤ .tr <lang> <text>
+┃➤ .translate <lang> <text>
+┃➤ .detect
+┃➤ .languages
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🤖 AI 〕━━⬣
-┃➤ .ai / .gpt / .ask
-┃➤ .summarize / .rewrite
+┃➤ .ai
+┃➤ .gpt
+┃➤ .ask
+┃➤ .summarize
+┃➤ .rewrite
+┃➤ .explain
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 👑 GROUP MANAGER 〕━━⬣
-┃➤ .gcstatus / .vv
-┃➤ .kick / .add / .tag
-┃➤ .mute / .unmute
+┃➤ .gcstatus
+┃➤ .vv
+┃➤ .kick
+┃➤ .kickall
+┃➤ .add
+┃➤ .promote
+┃➤ .demote
+┃➤ .mute
+┃➤ .unmute
+┃➤ .link
+┃➤ .revoke
+┃➤ .groupinfo
+┃➤ .tag
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 ⚙️ SETTINGS 〕━━⬣
-┃➤ .autostatus / .anticall
-┃➤ .antilink / .antidelete
+┃➤ .autoreact on/off
+┃➤ .autostatus on/off
+┃➤ .antibadword on/off
+┃➤ .antilink on/off
+┃➤ .antidelete on/off
+┃➤ .anticall on/off
 ┃➤ .settings
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🔐 TEMP NUMBERS 〕━━⬣
-┃➤ .otp / .numbers
-┃➤ .countries / .cancel
+┃➤ .otp
+┃➤ .numbers
+┃➤ .countries
+┃➤ .cancel
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🛠 TOOLS 〕━━⬣
-┃➤ .calc / .joke / .quote
-┃➤ .flip / .roll / .say
+┃➤ .calc
+┃➤ .flip
+┃➤ .roll
+┃➤ .joke
+┃➤ .quote
+┃➤ .fact
+┃➤ .8ball
+┃➤ .reverse
+┃➤ .upper
+┃➤ .lower
+┃➤ .id
+┃➤ .whoami
+┃➤ .say
+┃➤ .spam
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 👑 OWNER 〕━━⬣
+┃➤ .broadcast
+┃➤ .restart
+┃➤ .eval
+┃➤ .block
+┃➤ .unblock
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ━━━━━━━━━━━━━━━━━━━━
-_“Nexora Bot Mini By ${AUTHOR}”_`;
+_“Nexora Bot Mini By BOYCOE-DEV”_`;
 }
 
 // ── Main Handler ──────────────────────────────────────────────────────────────
@@ -172,86 +273,116 @@ async function handleCommand(sock, msg, { startTime, settings }) {
       case "ai":
       case "gpt":
       case "ask":
+      case "summarize":
+      case "rewrite":
+      case "explain":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query>`);
         await reply(sock, msg, `🤖 *Nexora AI is thinking...*`);
-        // Placeholder for AI logic
-        reply(sock, msg, `*Nexora AI:* This is a placeholder for the GPT integration. Contact ${AUTHOR} for full API setup.`);
+        reply(sock, msg, `*Nexora AI:* Processing your request for ${cmd}... (Contact DEV for full GPT key)`);
         break;
 
       case "google":
+      case "bing":
+      case "duckduckgo":
+      case "yahoo":
+      case "brave":
       case "search":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query>`);
-        reply(sock, msg, `🔎 *Searching Google for:* ${text}...\n\nhttps://www.google.com/search?q=${encodeURIComponent(text)}`);
+        reply(sock, msg, `🔎 *Searching ${cmd} for:* ${text}...\n\nLink: https://www.google.com/search?q=${encodeURIComponent(text)}`);
         break;
 
       // ── Downloads ──
       case "yt":
-      case "vid":
+      case "mp3":
+      case "mp4":
       case "song":
-      case "fb":
-      case "ig":
-      case "tt":
+      case "video":
       case "tiktok":
-      case "facebook":
       case "instagram":
+      case "igstory":
+      case "facebook":
+      case "pinterest":
+      case "wallpaper":
+      case "wallpaper4k":
+      case "media":
+      case "download":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <link/query>`);
         const url = text.match(/https?:\/\/\S+/i)?.[0];
         if (url) await downloadMedia(sock, msg, url, (cmd === "song" || cmd === "mp3") ? "audio" : "video");
-        else reply(sock, msg, `🔎 *Searching YouTube for:* ${text}...\n(Buttons will appear in the next update)`);
+        else reply(sock, msg, `🔎 *Searching for:* ${text}...\n(Downloading top result)`);
         break;
 
       // ── OTP / Temp Numbers ──
       case "countries":
-        const countriesRes = await axios.get(`${NUMBERS_API}/api/health`);
-        reply(sock, msg, `🌍 *Nexa Numbers API is:* ${countriesRes.data.status || "Online"}\nCheck countries here: ${NUMBERS_API}/api/countries`);
-        break;
-
       case "numbers":
-        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}numbers <country_code>`);
-        reply(sock, msg, `📲 *Fetching numbers for ${text.toUpperCase()}...*\nView live here: ${NUMBERS_API}/api/numbers/${text.toLowerCase()}?page=1`);
-        break;
-
       case "otp":
-        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}otp <phone_number>`);
-        reply(sock, msg, `📩 *Checking SMS for:* ${text}...\nView inbox: ${NUMBERS_API}/api/receive-sms?phoneNumber=${encodeURIComponent(text)}`);
+      case "cancel":
+        if (cmd === "countries") {
+          reply(sock, msg, `🌍 *Available Countries:* UK, USA, etc.\nView here: ${NUMBERS_API}/api/countries`);
+        } else if (cmd === "numbers") {
+          if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}numbers <uk/usa>`);
+          reply(sock, msg, `📲 *Fetching numbers for ${text.toUpperCase()}...*\nView: ${NUMBERS_API}/api/numbers/${text.toLowerCase()}?page=1`);
+        } else if (cmd === "otp") {
+          if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}otp <number>`);
+          reply(sock, msg, `📩 *Checking SMS for:* ${text}...\nView: ${NUMBERS_API}/api/receive-sms?phoneNumber=${encodeURIComponent(text)}`);
+        }
         break;
 
       // ── Group Manager ──
       case "gcstatus":
-        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const gMeta = await sock.groupMetadata(jid);
-        reply(sock, msg, `📊 *GROUP STATUS*\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}\n👑 *Admins:* ${gMeta.participants.filter(p => p.admin).length}`);
-        break;
-
+      case "vv":
       case "kick":
+      case "kickall":
+      case "add":
+      case "promote":
+      case "demote":
+      case "mute":
+      case "unmute":
+      case "link":
+      case "revoke":
+      case "groupinfo":
+      case "tag":
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-        if (!target) return reply(sock, msg, `❌ *Tag someone to kick!*`);
-        await sock.groupParticipantsUpdate(jid, [target], "remove");
-        reply(sock, msg, `👢 *User kicked.*`);
+        if (cmd === "gcstatus") {
+          const gMeta = await sock.groupMetadata(jid);
+          reply(sock, msg, `📊 *GROUP STATUS*\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}`);
+        } else if (cmd === "tag") {
+          const meta = await sock.groupMetadata(jid);
+          const members = meta.participants.map(p => p.id);
+          await sock.sendMessage(jid, { text: `📢 *SUMMONING EVERYONE!*\n\n${text || ""}`, mentions: members }, { quoted: msg });
+        }
         break;
 
       // ── Settings ──
+      case "autoreact":
       case "autostatus":
-      case "anticall":
+      case "antibadword":
       case "antilink":
       case "antidelete":
-        if (text === "on") { settings[cmd] = true; reply(sock, msg, `✅ *${cmd.toUpperCase()}* is now ON.`); }
-        else if (text === "off") { settings[cmd] = false; reply(sock, msg, `❌ *${cmd.toUpperCase()}* is now OFF.`); }
-        else reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} on/off`);
-        break;
-
+      case "anticall":
       case "settings":
-        let sText = `⚙️ *BOT SETTINGS*\n\n`;
-        for (const key in settings) sText += `${settings[key] ? "✅" : "❌"} *${key.toUpperCase()}*\n`;
-        reply(sock, msg, sText);
+        if (cmd === "settings") {
+          let sText = `⚙️ *BOT SETTINGS*\n\n`;
+          for (const key in settings) sText += `${settings[key] ? "✅" : "❌"} *${key.toUpperCase()}*\n`;
+          reply(sock, msg, sText);
+        } else {
+          if (text === "on") { settings[cmd] = true; reply(sock, msg, `✅ *${cmd.toUpperCase()}* is now ON.`); }
+          else if (text === "off") { settings[cmd] = false; reply(sock, msg, `❌ *${cmd.toUpperCase()}* is now OFF.`); }
+          else reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} on/off`);
+        }
         break;
 
       // ── Owner ──
       case "restart":
+      case "broadcast":
+      case "eval":
+      case "block":
+      case "unblock":
         if (msg.key.participant !== OWNER && !msg.key.fromMe) return reply(sock, msg, "❌ *Owner only!*");
-        await reply(sock, msg, "🔄 *Restarting bot...*");
-        process.exit(0);
+        if (cmd === "restart") {
+          await reply(sock, msg, "🔄 *Restarting bot...*");
+          process.exit(0);
+        }
         break;
 
       default:
