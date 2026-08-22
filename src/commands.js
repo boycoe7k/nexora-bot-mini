@@ -7,11 +7,11 @@ const AUTHOR = "Boycoe-dev";
 const MENU_IMAGE = "https://ibb.co/TB8XpF2T";
 const OWNER = process.env.OWNER_NUMBER || "263781021754";
 
-// ── Nexa VDL Config ──
-const API_URL = "https://video-download-api-l5m6.onrender.com";
+// ── API Configs ──
+const VDL_API = "https://video-download-api-l5m6.onrender.com";
+const EDITOR_API = "https://nexaeditor.onrender.com";
+const NUMBERS_API = "https://nexa-numbers.onrender.com";
 const API_KEY = process.env.API_KEY || "Nexora_YOUR_KEY_HERE";
-const POLL_INTERVAL_MS = 3000;
-const MAX_POLL_ATTEMPTS = 120;
 
 const headers = {
   "Content-Type": "application/json",
@@ -38,11 +38,6 @@ async function react(sock, msg, emoji) {
   try { await sock.sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } }); } catch (_) {}
 }
 
-function extractUrl(text) {
-  const match = text.match(/https?:\/\/\S+/i);
-  return match ? match[0] : null;
-}
-
 function getRuntime(startTime) {
   const diff = Date.now() - startTime;
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
@@ -57,91 +52,88 @@ async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
   try {
-    const infoRes = await axios.post(`${API_URL}/api/media/info`, { url }, { headers });
-    if (!infoRes.data.success) throw new Error(infoRes.data.error || "Failed to fetch media info");
-    const title = infoRes.data.title || "Nexora Download";
-    await reply(sock, msg, `🎬 *Found:* ${title.slice(0, 50)}...\n⏱️ *Starting download...*`);
-    const dlRes = await axios.post(`${API_URL}/api/media/download`, { url, type, quality: "720p" }, { headers });
+    const dlRes = await axios.post(`${VDL_API}/api/media/download`, { url, type, quality: "720p" }, { headers });
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
     const jobId = dlRes.data.jobId;
     let attempts = 0;
     let statusData = null;
-    while (attempts < MAX_POLL_ATTEMPTS) {
+    while (attempts < 60) {
       attempts++;
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
-      const statusRes = await axios.get(`${API_URL}/api/status/${jobId}`, { headers });
+      await new Promise(r => setTimeout(r, 3000));
+      const statusRes = await axios.get(`${VDL_API}/api/status/${jobId}`, { headers });
       statusData = statusRes.data;
       if (statusData.status === "completed") break;
       if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
-      if (attempts % 10 === 0 && statusData.progress) await reply(sock, msg, `⏳ *Progress:* ${statusData.progress}%`);
     }
     if (!statusData || statusData.status !== "completed") throw new Error("Download timed out");
-    await reply(sock, msg, `✅ *Download complete!*\n📤 *Sending file...*`);
-    const fileUrl = `${API_URL}/api/download/${jobId}`;
-    const buffer = await urlToBuffer(fileUrl);
-    if (type === "audio") await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg", fileName: `${title}.mp3` }, { quoted: msg });
-    else await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *${title}*`, fileName: `${title}.mp4` }, { quoted: msg });
+    const buffer = await urlToBuffer(`${VDL_API}/api/download/${jobId}`);
+    if (type === "audio") await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg" }, { quoted: msg });
+    else await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *Download Complete*` }, { quoted: msg });
     await react(sock, msg, "✅");
-  } catch (err) { await reply(sock, msg, `❌ *Nexora Error:* ${err.message}`); await react(sock, msg, "❌"); }
-}
-
-async function searchYouTubeWithButtons(sock, msg, query) {
-  try {
-    const jid = msg.key.remoteJid;
-    await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
-    const res = await axios.get(`${API_URL}/api/search?q=${encodeURIComponent(query)}`, { headers });
-    if (!res.data || !res.data.length) return reply(sock, msg, "❌ *No results found.*");
-    const topResult = res.data[0];
-    const caption = `📥 *NEXORA DOWNLOADER*\n\n📌 *Title:* ${topResult.title.slice(0, 60)}\n🌐 *Platform:* YouTube\n🔗 *URL:* ${topResult.url}\n\n_Select an option below:_`;
-    const buttons = [{ buttonId: `dl_video|${topResult.url}`, buttonText: { displayText: "🎥 Video" }, type: 1 }, { buttonId: `dl_audio|${topResult.url}`, buttonText: { displayText: "🎵 Audio" }, type: 1 }];
-    await sock.sendMessage(jid, { image: { url: topResult.thumbnail }, caption, footer: `Nexora Bot Mini By ${AUTHOR}`, buttons, headerType: 4 }, { quoted: msg });
-  } catch (err) { await reply(sock, msg, `❌ *Search failed:* ${err.message}`); }
+  } catch (err) { await reply(sock, msg, `❌ *Error:* ${err.message}`); await react(sock, msg, "❌"); }
 }
 
 function buildMenu(pushName, runtime) {
-  return `┌──『 *${BOT_NAME.toUpperCase()}* 』───
-│
-│ ➻ *STATUS:* ONLINE ✅
-│ ➻ *RUNTIME:* ${runtime}
-│ ➻ *MODE:* Public
-│ ➻ *ACTIVE BOTS:* 1
-│ ➻ *TOTAL CMDS:* 206+
-│ ➻ *DEV:* ${AUTHOR.toUpperCase()}
-│
-└───────────────┈ ➻
+  return `╭━〔 ⚡ NEXORA×MD ⚡ 〕━⬣
+┃
+┃ | [] ➜ STATUS    : ONLINE ✅
+┃ | [] ➜ RUNTIME   : ${runtime}
+┃ | [] ➜ MODE      : Public
+┃ | [] ➜ ACTIVE BOTS   : 1
+┃ | [] ➜ COMMANDS  : 206+
+┃ | [] ➜ DEV       : ${AUTHOR.toUpperCase()}
+┃
+╰━━━━━━━━━━━━━━━━━━━━⬣
 
-👑 *GROUP MANAGER*
-┣ \`${PREFIX}gcstatus\`
-┣ \`${PREFIX}vv\`
-┣ \`${PREFIX}kick\`
-┣ \`${PREFIX}add\`
-┣ \`${PREFIX}promote\`
-┣ \`${PREFIX}demote\`
-┣ \`${PREFIX}mute\`
-┣ \`${PREFIX}unmute\`
-┣ \`${PREFIX}link\`
-┣ \`${PREFIX}revoke\`
-┣ \`${PREFIX}groupinfo\`
-┗ \`${PREFIX}tag\`
+╭━━〔 📥 DOWNLOADS 〕━━⬣
+┃➤ .yt / .song / .vid
+┃➤ .tiktok / .facebook
+┃➤ .instagram / .pinterest
+┃➤ .wallpaper / .media
+╰━━━━━━━━━━━━━━━━━━━━⬣
 
-⚙️ *SETTINGS*
-┣ \`${PREFIX}autoreact\` [on/off]
-┣ \`${PREFIX}autostatus\` [on/off]
-┣ \`${PREFIX}antibadword\` [on/off]
-┣ \`${PREFIX}antilink\` [on/off]
-┣ \`${PREFIX}antidelete\` [on/off]
-┣ \`${PREFIX}anticall\` [on/off]
-┗ \`${PREFIX}settings\`
+╭━━〔 🔎 SEARCH 〕━━⬣
+┃➤ .google / .bing
+┃➤ .wiki / .image
+┃➤ .news / .weather
+╰━━━━━━━━━━━━━━━━━━━━⬣
 
-📥 *DOWNLOADER*
-┣ \`${PREFIX}vid\` / \`${PREFIX}song\`
-┣ \`${PREFIX}yt\` / \`${PREFIX}fb\`
-┗ \`${PREFIX}ig\` / \`${PREFIX}tt\`
+╭━━〔 🎬 VIDEO EDITOR 〕━━⬣
+┃➤ .trim / .crop
+┃➤ .resize / .speed
+╰━━━━━━━━━━━━━━━━━━━━⬣
 
-🎨 *FUN & TOOLS*
-┣ \`${PREFIX}sticker\`
-┣ \`${PREFIX}joke\`
-┗ \`${PREFIX}wiki\`
+╭━━〔 🖼️ IMAGE EDITOR 〕━━⬣
+┃➤ .filter / .resize
+┃➤ .text / .watermark
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 🤖 AI 〕━━⬣
+┃➤ .ai / .gpt / .ask
+┃➤ .summarize / .rewrite
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 👑 GROUP MANAGER 〕━━⬣
+┃➤ .gcstatus / .vv
+┃➤ .kick / .add / .tag
+┃➤ .mute / .unmute
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 ⚙️ SETTINGS 〕━━⬣
+┃➤ .autostatus / .anticall
+┃➤ .antilink / .antidelete
+┃➤ .settings
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 🔐 TEMP NUMBERS 〕━━⬣
+┃➤ .otp / .numbers
+┃➤ .countries / .cancel
+╰━━━━━━━━━━━━━━━━━━━━⬣
+
+╭━━〔 🛠 TOOLS 〕━━⬣
+┃➤ .calc / .joke / .quote
+┃➤ .flip / .roll / .say
+╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ━━━━━━━━━━━━━━━━━━━━
 _“Nexora Bot Mini By ${AUTHOR}”_`;
@@ -156,7 +148,6 @@ async function handleCommand(sock, msg, { startTime, settings }) {
 
     if (rawText.startsWith("dl_video|") || rawText.startsWith("dl_audio|")) {
       const [type, url] = rawText.split("|");
-      await react(sock, msg, "🚀");
       return downloadMedia(sock, msg, url, type === "dl_video" ? "video" : "audio");
     }
 
@@ -169,6 +160,7 @@ async function handleCommand(sock, msg, { startTime, settings }) {
 
     switch (cmd) {
       case "menu":
+      case "help":
         const menu = buildMenu(msg.pushName || "User", getRuntime(startTime));
         try {
           const buf = await urlToBuffer(MENU_IMAGE);
@@ -176,47 +168,74 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         } catch { await reply(sock, msg, menu); }
         break;
 
+      // ── Search & AI ──
+      case "ai":
+      case "gpt":
+      case "ask":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query>`);
+        await reply(sock, msg, `🤖 *Nexora AI is thinking...*`);
+        // Placeholder for AI logic
+        reply(sock, msg, `*Nexora AI:* This is a placeholder for the GPT integration. Contact ${AUTHOR} for full API setup.`);
+        break;
+
+      case "google":
+      case "search":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query>`);
+        reply(sock, msg, `🔎 *Searching Google for:* ${text}...\n\nhttps://www.google.com/search?q=${encodeURIComponent(text)}`);
+        break;
+
+      // ── Downloads ──
+      case "yt":
+      case "vid":
+      case "song":
+      case "fb":
+      case "ig":
+      case "tt":
+      case "tiktok":
+      case "facebook":
+      case "instagram":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <link/query>`);
+        const url = text.match(/https?:\/\/\S+/i)?.[0];
+        if (url) await downloadMedia(sock, msg, url, (cmd === "song" || cmd === "mp3") ? "audio" : "video");
+        else reply(sock, msg, `🔎 *Searching YouTube for:* ${text}...\n(Buttons will appear in the next update)`);
+        break;
+
+      // ── OTP / Temp Numbers ──
+      case "countries":
+        const countriesRes = await axios.get(`${NUMBERS_API}/api/health`);
+        reply(sock, msg, `🌍 *Nexa Numbers API is:* ${countriesRes.data.status || "Online"}\nCheck countries here: ${NUMBERS_API}/api/countries`);
+        break;
+
+      case "numbers":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}numbers <country_code>`);
+        reply(sock, msg, `📲 *Fetching numbers for ${text.toUpperCase()}...*\nView live here: ${NUMBERS_API}/api/numbers/${text.toLowerCase()}?page=1`);
+        break;
+
+      case "otp":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}otp <phone_number>`);
+        reply(sock, msg, `📩 *Checking SMS for:* ${text}...\nView inbox: ${NUMBERS_API}/api/receive-sms?phoneNumber=${encodeURIComponent(text)}`);
+        break;
+
+      // ── Group Manager ──
       case "gcstatus":
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
         const gMeta = await sock.groupMetadata(jid);
-        reply(sock, msg, `📊 *GROUP STATUS*\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}`);
-        break;
-
-      case "vv":
-        reply(sock, msg, "✅ *Anti-ViewOnce Triggered!*");
+        reply(sock, msg, `📊 *GROUP STATUS*\n📌 *Name:* ${gMeta.subject}\n👥 *Members:* ${gMeta.participants.length}\n👑 *Admins:* ${gMeta.participants.filter(p => p.admin).length}`);
         break;
 
       case "kick":
-      case "promote":
-      case "demote":
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0] || msg.message?.extendedTextMessage?.contextInfo?.participant;
-        if (!target) return reply(sock, msg, `❌ *Tag someone to ${cmd}!*`);
-        await sock.groupParticipantsUpdate(jid, [target], cmd === "kick" ? "remove" : cmd);
-        reply(sock, msg, `✅ *Action ${cmd} completed.*`);
+        const target = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+        if (!target) return reply(sock, msg, `❌ *Tag someone to kick!*`);
+        await sock.groupParticipantsUpdate(jid, [target], "remove");
+        reply(sock, msg, `👢 *User kicked.*`);
         break;
 
-      case "mute":
-      case "unmute":
-        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        await sock.groupSettingUpdate(jid, cmd === "mute" ? "announcement" : "not_announcement");
-        reply(sock, msg, `✅ *Group ${cmd}d.*`);
-        break;
-
-      case "tag":
-      case "tagall":
-        if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
-        const meta = await sock.groupMetadata(jid);
-        const members = meta.participants.map(p => p.id);
-        await sock.sendMessage(jid, { text: `📢 *SUMMONING EVERYONE!*\n\n${text || ""}\n\n` + members.map(m => `@${m.split("@")[0]}`).join(" "), mentions: members }, { quoted: msg });
-        break;
-
-      case "autoreact":
+      // ── Settings ──
       case "autostatus":
-      case "antibadword":
+      case "anticall":
       case "antilink":
       case "antidelete":
-      case "anticall":
         if (text === "on") { settings[cmd] = true; reply(sock, msg, `✅ *${cmd.toUpperCase()}* is now ON.`); }
         else if (text === "off") { settings[cmd] = false; reply(sock, msg, `❌ *${cmd.toUpperCase()}* is now OFF.`); }
         else reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} on/off`);
@@ -228,18 +247,11 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         reply(sock, msg, sText);
         break;
 
-      case "vid":
-        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}vid <video name>`);
-        const vUrl = extractUrl(text);
-        if (vUrl) await downloadMedia(sock, msg, vUrl, "video");
-        else await searchYouTubeWithButtons(sock, msg, text);
-        break;
-
-      case "song":
-        if (!text) return reply(sock, msg, `❌ *Usage:* ${PREFIX}song <song name>`);
-        const sUrl = extractUrl(text);
-        if (sUrl) await downloadMedia(sock, msg, sUrl, "audio");
-        else await searchYouTubeWithButtons(sock, msg, text);
+      // ── Owner ──
+      case "restart":
+        if (msg.key.participant !== OWNER && !msg.key.fromMe) return reply(sock, msg, "❌ *Owner only!*");
+        await reply(sock, msg, "🔄 *Restarting bot...*");
+        process.exit(0);
         break;
 
       default:
