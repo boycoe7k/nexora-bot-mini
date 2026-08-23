@@ -9,14 +9,28 @@ const MENU_IMAGE = "https://i.ibb.co/JR7L0Mtd/4eb100a2-65ed-4607-8b68-26280d75f6
 const OWNER = process.env.OWNER_NUMBER || "263781021754";
 
 // ── API Configs ──
-const VDL_API = "https://video-download-api-l5m6.onrender.com";
+// Nexa VDL API configuration. The API runs in open mode when no key is set.
+const VDL_API = (
+  process.env.NEXA_VDL_API_URL ||
+  process.env.VDL_API_URL ||
+  "https://video-download-api-l5m6.onrender.com"
+).replace(/\/+$/, "");
 const EDITOR_API = "https://nexaeditor.onrender.com";
 const NUMBERS_API = "https://nexa-numbers.onrender.com";
-const API_KEY = process.env.API_KEY || "Nexora_YOUR_KEY_HERE";
+const API_KEY = process.env.NEXA_VDL_API_KEY || process.env.API_KEY || "";
 
 const headers = {
   "Content-Type": "application/json",
-  ...(API_KEY ? { "x-api-key": API_KEY } : {}),
+  ...(API_KEY && API_KEY !== "Nexora_YOUR_KEY_HERE"
+    ? { "x-api-key": API_KEY }
+    : {}),
+};
+
+const VDL_ENDPOINTS = {
+  search: `${VDL_API}/api/search`,
+  startDownload: `${VDL_API}/api/media/download`,
+  status: (jobId) => `${VDL_API}/api/status/${encodeURIComponent(jobId)}`,
+  file: (jobId) => `${VDL_API}/api/download/${encodeURIComponent(jobId)}`,
 };
 
 // Initialize OpenAI for AI commands
@@ -70,7 +84,11 @@ async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
   try {
-    const dlRes = await axios.post(`${VDL_API}/api/media/download`, { url, type, quality: "720p" }, { headers });
+    const dlRes = await axios.post(
+      VDL_ENDPOINTS.startDownload,
+      { url, type, quality: "720p" },
+      { headers, timeout: 30000 }
+    );
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
     const jobId = dlRes.data.jobId;
     let attempts = 0;
@@ -78,13 +96,16 @@ async function downloadMedia(sock, msg, url, type = "video") {
     while (attempts < 60) {
       attempts++;
       await new Promise(r => setTimeout(r, 3000));
-      const statusRes = await axios.get(`${VDL_API}/api/status/${jobId}`, { headers });
+      const statusRes = await axios.get(VDL_ENDPOINTS.status(jobId), {
+        headers,
+        timeout: 30000,
+      });
       statusData = statusRes.data;
       if (statusData.status === "completed") break;
       if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
     }
     if (!statusData || statusData.status !== "completed") throw new Error("Download timed out");
-    const buffer = await urlToBuffer(`${VDL_API}/api/download/${jobId}`);
+    const buffer = await urlToBuffer(VDL_ENDPOINTS.file(jobId));
     if (type === "audio") await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg" }, { quoted: msg });
     else await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: `✅ *Download Complete*` }, { quoted: msg });
     await react(sock, msg, "✅");
@@ -95,7 +116,11 @@ async function youtubeSearch(sock, msg, query) {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `🔎 *Searching YouTube for:* ${query}...`);
   try {
-    const res = await axios.get(`${VDL_API}/api/search?q=${encodeURIComponent(query)}`, { headers });
+    const res = await axios.get(VDL_ENDPOINTS.search, {
+      params: { q: query },
+      headers,
+      timeout: 30000,
+    });
     const results = res.data.results || [];
     if (results.length === 0) return reply(sock, msg, "❌ No results found.");
 
@@ -160,20 +185,19 @@ function buildMenu(pushName, runtime) {
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 📥 DOWNLOADS 〕━━⬣
-┃➤ .yt <query>
-┃➤ .mp3 <url>
-┃➤ .mp4 <url>
-┃➤ .song <query/url>
-┃➤ .video <query/url>
-┃➤ .tiktok <url>
-┃➤ .instagram <url>
-┃➤ .igstory <url>
-┃➤ .facebook <url>
-┃➤ .pinterest <url>
-┃➤ .wallpaper <query>
-┃➤ .wallpaper4k <query>
-┃➤ .media <url>
-┃➤ .download <url>
+┃➤ .yt <url or query>
+┃➤ .song <query or URL>
+┃➤ .video <query or URL>
+┃➤ .mp3 <URL>
+┃➤ .mp4 <URL>
+┃➤ .tt <TikTok URL>
+┃➤ .ig <Instagram URL>
+┃➤ .fb <Facebook URL>
+┃➤ .tiktok <TikTok URL>
+┃➤ .instagram <Instagram URL>
+┃➤ .facebook <Facebook URL>
+┃➤ .media <supported URL>
+┃➤ .download <supported URL>
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🔎 SEARCH 〕━━⬣
@@ -370,8 +394,12 @@ async function handleCommand(sock, msg, { startTime, settings }) {
 
       // ── Downloads ──
       case "yt":
-        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}yt <query>`);
-        await youtubeSearch(sock, msg, text);
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}yt <url or search query>`);
+        if (/^https?:\/\//i.test(text)) {
+          await downloadMedia(sock, msg, text, "video");
+        } else {
+          await youtubeSearch(sock, msg, text);
+        }
         break;
       case "song":
       case "mp3":
@@ -385,11 +413,16 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         if (text.startsWith("http")) await downloadMedia(sock, msg, text, "video");
         else await youtubeSearch(sock, msg, text);
         break;
+      case "tt":
       case "tiktok":
+      case "ig":
       case "instagram":
+      case "fb":
       case "facebook":
-      case "pinterest":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <url>`);
+        if (!/^https?:\/\//i.test(text)) {
+          return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <url>`);
+        }
         await downloadMedia(sock, msg, text, "video");
         break;
 
