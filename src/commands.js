@@ -173,7 +173,7 @@ async function handleAI(sock, msg, prompt) {
 }
 
 function buildMenu(pushName, runtime) {
-  return `╭━〔 ⚡ NEXORA×MD ⚡ 〕━⬣
+  return `╭━〔 *Nexora Bot Mini* 〕━⬣
 ┃
 ┃ | [] ➜ STATUS    : ONLINE
 ┃ | [] ➜ RUNTIME   : ${runtime}
