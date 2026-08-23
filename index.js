@@ -41,6 +41,12 @@ const settings = {
 
 const messageStore = {};
 
+// Anti-link warning tracker: "groupJid:userJid" -> number of warnings so far.
+// At 3 warnings the user is removed and their count is reset.
+const linkWarnings = {};
+const LINK_REGEX = /https?:\/\/\S+|www\.\S+\.\S+|wa\.me\/\S+/i;
+const MAX_LINK_WARNINGS = 3;
+
 // ─── Status State ───
 const status = {
   connection: "starting",
@@ -262,13 +268,45 @@ async function startBot() {
       const jid = msg.key.remoteJid;
       const text = (msg.message.conversation || msg.message.extendedTextMessage?.text || "").toLowerCase();
       if (settings.antidelete && !msg.key.fromMe) messageStore[msg.key.id] = msg;
-      if (settings.autostatus && jid === "status@broadcast") await sock.readMessages([msg.key]);
-      if (settings.antilink && jid.endsWith("@g.us") && text.includes("chat.whatsapp.com")) {
-        const groupMeta = await sock.groupMetadata(jid);
-        const isAdmin = groupMeta.participants.find(p => p.id === msg.key.participant)?.admin;
-        if (!isAdmin && !msg.key.fromMe) {
-          await sock.sendMessage(jid, { delete: msg.key });
-          await sock.groupParticipantsUpdate(jid, [msg.key.participant], "remove");
+
+      // Auto-view (and react to) status updates when enabled.
+      if (settings.autostatus && jid === "status@broadcast") {
+        try {
+          await sock.readMessages([msg.key]);
+        } catch (err) {
+          console.error("autostatus: failed to view status:", err.message);
+        }
+      }
+
+      // Anti-link: delete any link a non-admin sends in a group, warn them,
+      // and remove them once they hit 3 warnings.
+      if (settings.antilink && jid.endsWith("@g.us") && !msg.key.fromMe && LINK_REGEX.test(text)) {
+        try {
+          const groupMeta = await sock.groupMetadata(jid);
+          const sender = msg.key.participant;
+          const isAdmin = groupMeta.participants.find(p => p.id === sender)?.admin;
+          const isBot = sender?.split("@")[0] === sock.user?.id?.split(":")[0];
+          if (!isAdmin && !isBot && sender) {
+            await sock.sendMessage(jid, { delete: msg.key });
+            const key = `${jid}:${sender}`;
+            const count = (linkWarnings[key] || 0) + 1;
+            linkWarnings[key] = count;
+            if (count >= MAX_LINK_WARNINGS) {
+              delete linkWarnings[key];
+              await sock.sendMessage(jid, {
+                text: `🚫 *Anti-Link:* @${sender.split("@")[0]} hit ${MAX_LINK_WARNINGS}/${MAX_LINK_WARNINGS} warnings for sending links and has been removed.`,
+                mentions: [sender],
+              });
+              await sock.groupParticipantsUpdate(jid, [sender], "remove");
+            } else {
+              await sock.sendMessage(jid, {
+                text: `⚠️ *Anti-Link:* @${sender.split("@")[0]}, links aren't allowed here.\n*Warning ${count}/${MAX_LINK_WARNINGS}* — one more and you'll be removed.`,
+                mentions: [sender],
+              });
+            }
+          }
+        } catch (err) {
+          console.error("antilink: failed to process link:", err.message);
         }
       }
       await handleCommand(sock, msg, { startTime, settings });
