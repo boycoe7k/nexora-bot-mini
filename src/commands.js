@@ -47,6 +47,86 @@ const VDL_ENDPOINTS = {
   file: (jobId) => `${VDL_API}/api/download/${encodeURIComponent(jobId)}`,
 };
 
+// Render can briefly return gateway errors while the VDL worker is waking up or
+// finishing a job. Retry only safe GET requests and keep the retry scope inside
+// the downloader so unrelated bot commands retain their original behavior.
+const VDL_RETRY_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const AUTOREACT_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥", "✨"];
+let lastAutoReactIndex = -1;
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function nextAutoReact() {
+  let index = Math.floor(Math.random() * AUTOREACT_EMOJIS.length);
+  if (index === lastAutoReactIndex) index = (index + 1) % AUTOREACT_EMOJIS.length;
+  lastAutoReactIndex = index;
+  return AUTOREACT_EMOJIS[index];
+}
+
+function getVdlGetHeaders() {
+  return API_KEY && API_KEY !== "Nexora_YOUR_KEY_HERE" ? { "x-api-key": API_KEY } : {};
+}
+
+function resolveVdlUrl(candidate, fallback) {
+  if (!candidate) return fallback;
+  try { return new URL(candidate, `${VDL_API}/`).toString(); } catch (_) { return fallback; }
+}
+
+function backendErrorText(err) {
+  const body = err?.response?.data;
+  if (!body) return "";
+  if (Buffer.isBuffer(body)) return body.toString("utf8").replace(/\s+/g, " ").slice(0, 240);
+  if (typeof body === "string") return body.replace(/\s+/g, " ").slice(0, 240);
+  if (typeof body === "object") return body.error || body.message || "";
+  return "";
+}
+
+function describeVdlError(err) {
+  const status = err?.response?.status;
+  const detail = backendErrorText(err);
+  if (status === 502 || status === 503 || status === 504) {
+    return `VDL server is temporarily unavailable (HTTP ${status}). Please try again in a few seconds.`;
+  }
+  if (status) return `VDL returned HTTP ${status}${detail ? `: ${detail}` : ""}`;
+  return detail || err?.message || "Download failed";
+}
+
+async function vdlGet(url, options = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await axios.get(url, {
+        ...options,
+        headers: getVdlGetHeaders(),
+        timeout: options.timeout || 45000,
+      });
+    } catch (err) {
+      lastError = err;
+      const status = err?.response?.status;
+      if (!VDL_RETRY_STATUS_CODES.has(status) || attempt === 2) throw err;
+      await wait(1500 * (attempt + 1));
+    }
+  }
+  throw lastError;
+}
+
+async function vdlStartDownload(payload) {
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await axios.post(VDL_ENDPOINTS.startDownload, payload, { headers, timeout: 45000 });
+    } catch (err) {
+      lastError = err;
+      const status = err?.response?.status;
+      if (!VDL_RETRY_STATUS_CODES.has(status) || attempt === 1) throw err;
+      await wait(2000);
+    }
+  }
+  throw lastError;
+}
+
 let openai;
 try {
   if (process.env.OPENAI_API_KEY) openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -70,6 +150,11 @@ function getMessageText(msg) {
 
 async function urlToBuffer(url) {
   const res = await axios.get(url, { responseType: "arraybuffer", timeout: 60000, headers });
+  return Buffer.from(res.data);
+}
+
+async function vdlFileToBuffer(url) {
+  const res = await vdlGet(url, { responseType: "arraybuffer", timeout: 60000 });
   return Buffer.from(res.data);
 }
 
@@ -227,33 +312,29 @@ async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
   try {
-    const dlRes = await axios.post(
-      VDL_ENDPOINTS.startDownload,
-      { url, type, quality: "720p" },
-      { headers, timeout: 30000 }
-    );
+    const dlRes = await vdlStartDownload({ url, type, quality: "720p" });
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
     const jobId = dlRes.data.jobId;
+    const statusUrl = resolveVdlUrl(dlRes.data.statusUrl, VDL_ENDPOINTS.status(jobId));
     let attempts = 0;
     let statusData = null;
     while (attempts < 60) {
       attempts++;
-      await new Promise((r) => setTimeout(r, 3000));
-      const statusRes = await axios.get(VDL_ENDPOINTS.status(jobId), {
-        headers,
-        timeout: 30000,
-      });
+      await wait(3000);
+      const statusRes = await vdlGet(statusUrl);
       statusData = statusRes.data;
+      if (statusData.success === false) throw new Error(statusData.error || "Status lookup failed");
       if (statusData.status === "completed") break;
       if (statusData.status === "failed") throw new Error(statusData.error || "Job failed");
     }
     if (!statusData || statusData.status !== "completed") throw new Error("Download timed out");
-    const buffer = await urlToBuffer(VDL_ENDPOINTS.file(jobId));
+    const fileUrl = resolveVdlUrl(statusData.downloadUrl, VDL_ENDPOINTS.file(jobId));
+    const buffer = await vdlFileToBuffer(fileUrl);
     if (type === "audio") await sock.sendMessage(jid, { audio: buffer, mimetype: "audio/mpeg" }, { quoted: msg });
     else await sock.sendMessage(jid, { video: buffer, mimetype: "video/mp4", caption: wrapCaption(`✅ *Download Complete*`) }, { quoted: msg });
     await react(sock, msg, "✅");
   } catch (err) {
-    await reply(sock, msg, `❌ *Error:* ${err.message}`);
+    await reply(sock, msg, `❌ *Error:* ${describeVdlError(err)}`);
     await react(sock, msg, "❌");
   }
 }
@@ -604,6 +685,10 @@ async function handleCommand(sock, msg, { startTime, settings }) {
     const rawText = getMessageText(msg).trim();
     const isGroup = jid.endsWith("@g.us");
 
+    if (settings.autoreact && !msg.key.fromMe && jid !== "status@broadcast") {
+      await react(sock, msg, nextAutoReact());
+    }
+
     if (!rawText.startsWith(PREFIX)) {
       if (rawText.includes("https://www.youtube.com/watch?v=")) {
         const url = rawText.match(/https?:\/\/\S+/i)?.[0];
@@ -616,8 +701,6 @@ async function handleCommand(sock, msg, { startTime, settings }) {
     const parts = rawText.slice(PREFIX.length).trim().split(/\s+/);
     const cmd = parts.shift().toLowerCase();
     const text = parts.join(" ");
-
-    if (settings.autoreact) await react(sock, msg, "🚀");
 
     switch (cmd) {
       // ── Menu ──
