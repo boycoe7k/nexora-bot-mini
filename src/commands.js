@@ -258,7 +258,7 @@ async function downloadMedia(sock, msg, url, type = "video") {
   }
 }
 
-async function youtubeSearch(sock, msg, query) {
+async function youtubeSearch(sock, msg, query, autoDownloadType = null) {
   const jid = msg.key.remoteJid;
   await reply(sock, msg, `🔎 *Searching for:* ${query}...`);
   try {
@@ -283,13 +283,18 @@ async function youtubeSearch(sock, msg, query) {
     }
     // Real tappable buttons (not fallback text) for picking audio or video.
     await sendButtons(sock, jid, msg, {
-      text: `*${first.title}*\nChoose a download format below 👇`,
+      text: autoDownloadType
+        ? `*${first.title}*\n⏬ Downloading the first result as ${autoDownloadType}...`
+        : `*${first.title}*\nChoose a download format below 👇`,
       footer: BOT_NAME,
       buttons: [
         { text: "🎵 Audio", id: `${PREFIX}song ${first.url}` },
         { text: "🎥 Video", id: `${PREFIX}video ${first.url}` },
       ],
     });
+    if (autoDownloadType) {
+      await downloadMedia(sock, msg, first.url, autoDownloadType);
+    }
   } catch (err) {
     reply(sock, msg, "❌ Error fetching search results.");
   }
@@ -621,13 +626,13 @@ async function handleCommand(sock, msg, { startTime, settings }) {
       case "mp3":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query|url>`);
         if (text.startsWith("http")) await downloadMedia(sock, msg, text, "audio");
-        else await youtubeSearch(sock, msg, text);
+        else await youtubeSearch(sock, msg, text, "audio");
         break;
       case "video":
       case "mp4":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query|url>`);
         if (text.startsWith("http")) await downloadMedia(sock, msg, text, "video");
-        else await youtubeSearch(sock, msg, text);
+        else await youtubeSearch(sock, msg, text, "video");
         break;
       case "tt":
       case "tiktok":
