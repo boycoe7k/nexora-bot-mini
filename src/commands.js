@@ -300,26 +300,101 @@ async function youtubeSearch(sock, msg, query, autoDownloadType = null) {
   }
 }
 
-// ── AI (OpenAI) ───────────────────────────────────────────────────────────────
-async function askOpenAI(sock, msg, prompt, { system } = {}) {
-  if (!openai) return reply(sock, msg, "❌ *AI unavailable:* set `OPENAI_API_KEY` in your env to enable AI, translate, tts and transcribe commands.");
+// ── AI Providers ───────────────────────────────────────────────────────────────
+// Keys are read only from deployment environment variables. Never hard-code them.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || "";
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || "";
+const AI_PROVIDER = (process.env.AI_PROVIDER || "auto").toLowerCase();
+const POLLINATIONS_API_KEY = process.env.POLLINATIONS_API_KEY || "";
+const POLLINATIONS_MODEL = process.env.POLLINATIONS_MODEL || "flux";
+
+async function askGemini(prompt, { system } = {}) {
+  if (!GEMINI_API_KEY) throw new Error("Gemini is not configured. Set GEMINI_API_KEY in the deployment environment.");
+  const response = await axios.post(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+    {
+      ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    },
+    { headers: { "Content-Type": "application/json", "X-goog-api-key": GEMINI_API_KEY }, timeout: 60000 }
+  );
+  const text = response.data?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+  if (!text) throw new Error("Gemini returned no text.");
+  return text;
+}
+
+async function askDeepSeek(prompt, { system } = {}) {
+  if (!DEEPSEEK_API_KEY) throw new Error("DeepSeek is not configured. Set DEEPSEEK_API_KEY in the deployment environment.");
+  const messages = system
+    ? [{ role: "system", content: system }, { role: "user", content: prompt }]
+    : [{ role: "user", content: prompt }];
+  const response = await axios.post(
+    "https://api.deepseek.com/chat/completions",
+    {
+      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      messages,
+      thinking: { type: "enabled" },
+      reasoning_effort: process.env.DEEPSEEK_REASONING_EFFORT || "high",
+      stream: false,
+    },
+    { headers: { "Content-Type": "application/json", Authorization: `Bearer ${DEEPSEEK_API_KEY}` }, timeout: 90000 }
+  );
+  const text = response.data?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("DeepSeek returned no text.");
+  return text;
+}
+
+async function askOpenAI(prompt, { system } = {}) {
+  if (!openai) throw new Error("OpenAI is not configured. Set OPENAI_API_KEY in the deployment environment.");
+  const messages = system ? [{ role: "system", content: system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }];
+  const response = await openai.chat.completions.create({ model: process.env.OPENAI_MODEL || "gpt-4o-mini", messages });
+  const text = response.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error("OpenAI returned no text.");
+  return text;
+}
+
+async function askTextAI(prompt, options = {}, preferredProvider = AI_PROVIDER) {
+  const providers = preferredProvider === "auto"
+    ? ["openai", "gemini", "deepseek"]
+    : [preferredProvider];
+  let lastError = null;
+  for (const provider of providers) {
+    const configured = provider === "openai" ? Boolean(openai) : provider === "gemini" ? Boolean(GEMINI_API_KEY) : provider === "deepseek" ? Boolean(DEEPSEEK_API_KEY) : false;
+    if (!configured) continue;
+    try {
+      if (provider === "gemini") return await askGemini(prompt, options);
+      if (provider === "deepseek") return await askDeepSeek(prompt, options);
+      return await askOpenAI(prompt, options);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("No AI provider is configured. Set OPENAI_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY.");
+}
+
+async function handleImageGeneration(sock, msg, prompt) {
+  if (!POLLINATIONS_API_KEY) return reply(sock, msg, "❌ *Image generation unavailable:* set `POLLINATIONS_API_KEY` in the deployment environment.");
   try {
-    const messages = system ? [{ role: "system", content: system }, { role: "user", content: prompt }] : [{ role: "user", content: prompt }];
-    const response = await openai.chat.completions.create({ model: "gpt-4o-mini", messages });
-    return response.choices[0].message.content;
+    const imageUrl = `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?model=${encodeURIComponent(POLLINATIONS_MODEL)}`;
+    const response = await axios.get(imageUrl, {
+      responseType: "arraybuffer",
+      headers: { Authorization: `Bearer ${POLLINATIONS_API_KEY}` },
+      timeout: 120000,
+    });
+    await sock.sendMessage(msg.key.remoteJid, { image: Buffer.from(response.data), caption: wrapCaption(`🖼️ *Generated image*\n\nPrompt: ${prompt}`) }, { quoted: msg });
   } catch (err) {
-    throw new Error("AI service unavailable right now.");
+    await reply(sock, msg, `❌ *Image generation failed:* ${err.response?.data?.error || err.message}`);
   }
 }
 
-async function handleAI(sock, msg, prompt, mode = "ai") {
+async function handleAI(sock, msg, prompt, mode = "ai", provider = AI_PROVIDER) {
   const systemPrompts = {
     summarize: "Summarize the following text clearly and concisely, in your own words.",
     rewrite: "Rewrite the following text to be clearer and better written, preserving its meaning.",
     explain: "Explain the following in simple, easy-to-understand terms.",
   };
   try {
-    const text = await askOpenAI(sock, msg, prompt, { system: systemPrompts[mode] });
+    const text = await askTextAI(prompt, { system: systemPrompts[mode] }, provider);
     if (text) await reply(sock, msg, `🤖 *Nexora AI:*\n\n${text}`);
   } catch (err) {
     await reply(sock, msg, `❌ ${err.message}`);
@@ -328,7 +403,7 @@ async function handleAI(sock, msg, prompt, mode = "ai") {
 
 async function handleTranslate(sock, msg, targetLang, text) {
   try {
-    const out = await askOpenAI(sock, msg, text, {
+    const out = await askTextAI(text, {
       system: `Translate the user's message into ${targetLang}. Reply with only the translation, nothing else.`,
     });
     if (out) await reply(sock, msg, `🌐 *Translated (${targetLang}):*\n\n${out}`);
@@ -339,7 +414,7 @@ async function handleTranslate(sock, msg, targetLang, text) {
 
 async function handleDetectLang(sock, msg, text) {
   try {
-    const out = await askOpenAI(sock, msg, text, {
+    const out = await askTextAI(text, {
       system: "Identify the language of the user's message. Reply with only the language name, nothing else.",
     });
     if (out) await reply(sock, msg, `🌐 *Detected language:* ${out}`);
@@ -372,7 +447,7 @@ async function handleTranscribe(sock, msg, { translateTo } = {}) {
     const transcript = await openai.audio.transcriptions.create({ file: fs.createReadStream(tmpFile), model: "whisper-1" });
     fs.unlinkSync(tmpFile);
     if (translateTo) {
-      const translated = await askOpenAI(sock, msg, transcript.text, { system: `Translate this into ${translateTo}. Reply with only the translation.` });
+      const translated = await askTextAI(transcript.text, { system: `Translate this into ${translateTo}. Reply with only the translation.` });
       return reply(sock, msg, `🎙️ *Transcript:*\n${transcript.text}\n\n🌐 *Translated (${translateTo}):*\n${translated}`);
     }
     await reply(sock, msg, `🎙️ *Transcript:*\n\n${transcript.text}`);
@@ -437,15 +512,18 @@ function buildMenu(pushName, runtime) {
 ┃➤ ${PREFIX}removebg
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
-╭━━〔 🎙️ VOICE & AI 〕━━⬣
-┃➤ ${PREFIX}tts
-┃➤ ${PREFIX}stt
-┃➤ ${PREFIX}vtr
-┃➤ ${PREFIX}tr
-┃➤ ${PREFIX}detect
-┃➤ ${PREFIX}ai / ${PREFIX}gpt / ${PREFIX}ask
-┃➤ ${PREFIX}summarize / ${PREFIX}rewrite / ${PREFIX}explain
-╰━━━━━━━━━━━━━━━━━━━━⬣
+  ╭━━〔 🎙️ VOICE & AI 〕━━⬣
+  ┃➤ ${PREFIX}tts
+  ┃➤ ${PREFIX}stt
+  ┃➤ ${PREFIX}vtr
+  ┃➤ ${PREFIX}tr
+  ┃➤ ${PREFIX}detect
+  ┃➤ ${PREFIX}ai / ${PREFIX}gpt / ${PREFIX}ask
+  ┃➤ ${PREFIX}gemini / ${PREFIX}deepseek
+  ┃➤ ${PREFIX}summarize / ${PREFIX}rewrite / ${PREFIX}explain
+  ┃➤ ${PREFIX}image <prompt>
+  ┃➤ ${PREFIX}suno (official API pending)
+  ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 👑 GROUP MANAGER 〕━━⬣ (admins only)
 ┃➤ ${PREFIX}gcstatus / ${PREFIX}groupinfo
@@ -530,12 +608,28 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query>`);
         await handleAI(sock, msg, text, "ai");
         break;
+      case "gemini":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}gemini <query>`);
+        await handleAI(sock, msg, text, "ai", "gemini");
+        break;
+      case "deepseek":
+      case "deep":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query>`);
+        await handleAI(sock, msg, text, "ai", "deepseek");
+        break;
+      case "image":
+      case "imagine":
+        if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <prompt>`);
+        await handleImageGeneration(sock, msg, text);
+        break;
       case "summarize":
       case "rewrite":
       case "explain":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <text>`);
         await handleAI(sock, msg, text, cmd);
         break;
+      case "suno":
+        return reply(sock, msg, "❌ *Suno integration is not enabled:* Suno does not currently provide a public self-serve API. Use Suno's official website, or provide an approved provider's official API documentation before connecting it.");
 
       // ── Translate / voice ──
       case "tr":
