@@ -457,7 +457,7 @@ async function handleTranscribe(sock, msg, { translateTo } = {}) {
 }
 
 function buildMenu(pushName, runtime) {
-  return `╭━〔 ⚡ ${BOT_NAME.toUpperCase()} ⚡ 〕━⬣
+  return `╭━〔 ${BOT_NAME.} 〕━⬣
 ┃ [] STATUS  : ONLINE
 ┃ [] RUNTIME : ${runtime}
 ┃ [] USER    : ${pushName}
@@ -466,16 +466,20 @@ function buildMenu(pushName, runtime) {
 
 ╭━━〔 📥 DOWNLOADS 〕━━⬣
 ┃➤ ${PREFIX}yt
-┃➤ ${PREFIX}song / ${PREFIX}mp3
-┃➤ ${PREFIX}video / ${PREFIX}mp4
-┃➤ ${PREFIX}tt / ${PREFIX}tiktok
-┃➤ ${PREFIX}ig / ${PREFIX}instagram / ${PREFIX}igstory
-┃➤ ${PREFIX}fb / ${PREFIX}facebook
+┃➤ ${PREFIX}song 
+┃➤ ${PREFIX}video 
+┃➤ ${PREFIX}tt
+┃➤ ${PREFIX}ig
+┃➤ ${PREFIX}fb 
 ┃➤ ${PREFIX}wallpaper
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 🔎 SEARCH 〕━━⬣
-┃➤ ${PREFIX}google / ${PREFIX}bing / ${PREFIX}duckduckgo / ${PREFIX}yahoo / ${PREFIX}brave
+┃➤ ${PREFIX}google
+┃➤ ${PREFIX}bing 
+┃➤ ${PREFIX}duckduckgo 
+┃➤ ${PREFIX}yahoo 
+┃➤ ${PREFIX}brave
 ┃➤ ${PREFIX}wiki
 ┃➤ ${PREFIX}define
 ┃➤ ${PREFIX}weather
@@ -499,7 +503,8 @@ function buildMenu(pushName, runtime) {
 ┃➤ ${PREFIX}trim
 ┃➤ ${PREFIX}speed
 ┃➤ ${PREFIX}vidfilter
-┃➤ ${PREFIX}mute / ${PREFIX}volume
+┃➤ ${PREFIX}mute 
+┃➤ ${PREFIX}volume
 ┃➤ ${PREFIX}videdit
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
@@ -518,19 +523,29 @@ function buildMenu(pushName, runtime) {
   ┃➤ ${PREFIX}vtr
   ┃➤ ${PREFIX}tr
   ┃➤ ${PREFIX}detect
-  ┃➤ ${PREFIX}ai / ${PREFIX}gpt / ${PREFIX}ask
-  ┃➤ ${PREFIX}gemini / ${PREFIX}deepseek
-  ┃➤ ${PREFIX}summarize / ${PREFIX}rewrite / ${PREFIX}explain
+  ┃➤ ${PREFIX}ai 
+  ┃➤ ${PREFIX}gpt /
+  ┃➤ ${PREFIX}ask
+  ┃➤ ${PREFIX}gemini /
+  ┃➤ ${PREFIX}deepseek
+  ┃➤ ${PREFIX}summarize 
+  ┃➤ ${PREFIX}rewrite /
+  ┃➤  ${PREFIX}explain
   ┃➤ ${PREFIX}image <prompt>
   ┃➤ ${PREFIX}suno (official API pending)
   ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 👑 GROUP MANAGER 〕━━⬣ (admins only)
-┃➤ ${PREFIX}gcstatus / ${PREFIX}groupinfo
-┃➤ ${PREFIX}kick / ${PREFIX}promote / ${PREFIX}demote
+┃➤ ${PREFIX}gcstatus 
+┃➤ ${PREFIX}groupinfo
+┃➤ ${PREFIX}kick 
+┃➤ ${PREFIX}promote 
+┃➤ ${PREFIX}demote
 ┃➤ ${PREFIX}add
-┃➤ ${PREFIX}mute / ${PREFIX}unmute
-┃➤ ${PREFIX}link / ${PREFIX}revoke
+┃➤ ${PREFIX}mute 
+┃➤ ${PREFIX}unmute
+┃➤ ${PREFIX}link 
+┃➤ ${PREFIX}revoke
 ┃➤ ${PREFIX}tag
 ┃➤ ${PREFIX}tagall
 ┃➤ ${PREFIX}kickall
@@ -539,7 +554,12 @@ function buildMenu(pushName, runtime) {
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 ⚙️ SETTINGS 〕━━⬣
-┃➤ ${PREFIX}autoreact / ${PREFIX}autostatus / ${PREFIX}antibadword / ${PREFIX}antilink / ${PREFIX}antidelete / ${PREFIX}anticall
+┃➤ ${PREFIX}autoreact 
+┃➤ ${PREFIX}autostatus 
+┃➤ ${PREFIX}antibadword 
+┃➤ ${PREFIX}antilink
+┃➤ ${PREFIX}antidelete 
+┃➤ ${PREFIX}anticall
 ┃➤ ${PREFIX}settings
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
@@ -551,17 +571,27 @@ function buildMenu(pushName, runtime) {
 
 ╭━━〔 🛠 TOOLS 〕━━⬣
 ┃➤ ${PREFIX}calc
-┃➤ ${PREFIX}flip / ${PREFIX}roll / ${PREFIX}8ball
-┃➤ ${PREFIX}joke / ${PREFIX}quote / ${PREFIX}fact
-┃➤ ${PREFIX}reverse / ${PREFIX}upper / ${PREFIX}lower
-┃➤ ${PREFIX}id / ${PREFIX}whoami
-┃➤ ${PREFIX}ping / ${PREFIX}alive / ${PREFIX}uptime
+┃➤ ${PREFIX}flip 
+┃➤ ${PREFIX}roll 
+┃➤ ${PREFIX}8ball
+┃➤ ${PREFIX}joke
+┃➤ ${PREFIX}quote 
+┃➤ ${PREFIX}fact
+┃➤ ${PREFIX}reverse 
+┃➤ ${PREFIX}upper 
+┃➤ ${PREFIX}lower
+┃➤ ${PREFIX}id 
+┃➤ ${PREFIX}whoami
+┃➤ ${PREFIX}ping 
+┃➤ ${PREFIX}alive 
+┃➤ ${PREFIX}uptime
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 👑 OWNER 〕━━⬣
 ┃➤ ${PREFIX}broadcast
 ┃➤ ${PREFIX}restart
-┃➤ ${PREFIX}block / ${PREFIX}unblock
+┃➤ ${PREFIX}block 
+┃➤ ${PREFIX}unblock
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 _"${BOT_NAME} By ${AUTHOR}"_`;
