@@ -457,7 +457,7 @@ async function handleTranscribe(sock, msg, { translateTo } = {}) {
 }
 
 function buildMenu(pushName, runtime) {
-  return `╭━〔 ${BOT_NAME.} 〕━⬣
+  return `╭━〔${BOT_NAME}〕━⬣
 ┃ [] STATUS  : ONLINE
 ┃ [] RUNTIME : ${runtime}
 ┃ [] USER    : ${pushName}
