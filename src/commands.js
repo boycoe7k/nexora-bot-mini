@@ -1147,19 +1147,31 @@ async function handleCommand(sock, msg, { startTime, settings }) {
       case "tagall": {
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
         const meta = await sock.groupMetadata(jid);
-        const rows = meta.participants.map((p) => ({
-          title: `+${p.id.split("@")[0]}`,
-          rowId: p.id,
-          description: p.admin ? "Admin" : "Member",
-        }));
-        await sock.sendMessage(jid, {
-          text: text || "📢 *Everyone has been tagged.*",
-          footer: BOT_NAME,
-          title: "Tag All",
-          buttonText: `View ${rows.length} member(s)`,
-          sections: [{ title: `${meta.subject} — ${rows.length} members`, rows }],
-          mentions: meta.participants.map((p) => p.id),
-        }, { quoted: msg });
+        const participantIds = meta.participants.map((p) => p.id).filter(Boolean);
+        const heading = text || "📢 *Everyone has been tagged.*";
+        const chunks = [];
+        let chunkText = heading;
+        let chunkMentions = [];
+
+        // WhatsApp only creates visible tags when each JID also has an @token
+        // in the message text. The previous list-message payload supplied the
+        // mentions array without those tokens, so nobody was actually tagged.
+        for (const participantId of participantIds) {
+          const token = `@${participantId.split("@")[0]}`;
+          const nextText = chunkMentions.length ? `${chunkText} ${token}` : `${chunkText}\n${token}`;
+          if (chunkMentions.length && nextText.length > 3500) {
+            chunks.push({ text: chunkText, mentions: chunkMentions });
+            chunkText = "📢 *Everyone else has been tagged.*";
+            chunkMentions = [];
+          }
+          chunkText = chunkMentions.length ? `${chunkText} ${token}` : `${chunkText}\n${token}`;
+          chunkMentions.push(participantId);
+        }
+        if (chunkMentions.length || !chunks.length) chunks.push({ text: chunkText, mentions: chunkMentions });
+
+        for (const chunk of chunks) {
+          await sock.sendMessage(jid, chunk, { quoted: msg });
+        }
         break;
       }
       case "vv": {
