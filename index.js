@@ -27,6 +27,15 @@ if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 // ─── Bot Branding ───
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Boycoe-dev";
+const OWNER_NUMBER = process.env.OWNER_NUMBER || "263781021754";
+const MENU_IMAGE = "https://i.ibb.co/xtLwMf12/file-00000000561c824699096bbdc5566486.png";
+const AUTO_FOLLOW_CHANNELS = [
+  "https://whatsapp.com/channel/0029Vb6flDp4yltRj3W6NU0z",
+  "https://whatsapp.com/channel/0029VbCApBP9hXFAg5xxJt3W",
+  "https://whatsapp.com/channel/0029VbBxPYN2kNFj3I1H1e0f",
+  "https://whatsapp.com/channel/0029VbBbkrj6WaKjj5jOd20g",
+  "https://whatsapp.com/channel/0029VbCF5WgC6ZvmFsYd9M3u",
+];
 const startTime = Date.now();
 
 // ─── Settings State ───
@@ -62,9 +71,60 @@ const status = {
 };
 
 let globalSock = null;
+let connectionOnboardingSent = false;
 
 function setStatus(patch) {
   Object.assign(status, patch, { lastUpdate: new Date().toISOString() });
+}
+
+function jidFromNumber(number) {
+  const digits = String(number || "").replace(/[^0-9]/g, "");
+  return digits ? `${digits}@s.whatsapp.net` : null;
+}
+
+function channelInviteCode(channelUrl) {
+  try {
+    const parts = new URL(channelUrl).pathname.split("/").filter(Boolean);
+    return parts[parts.length - 1] || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function followConfiguredChannels(sock) {
+  if (typeof sock.newsletterMetadata !== "function" || typeof sock.newsletterFollow !== "function") {
+    console.warn("channel follow skipped: this Baileys version has no newsletter API");
+    return;
+  }
+  for (const channelUrl of AUTO_FOLLOW_CHANNELS) {
+    const inviteCode = channelInviteCode(channelUrl);
+    if (!inviteCode) continue;
+    try {
+      const metadata = await sock.newsletterMetadata("invite", inviteCode);
+      const channelJid = metadata?.id || metadata?.jid;
+      if (!channelJid) throw new Error("channel metadata did not contain a JID");
+      await sock.newsletterFollow(channelJid);
+      console.log(`channel followed: ${channelJid}`);
+    } catch (err) {
+      console.warn(`channel follow failed for ${inviteCode}:`, err.message);
+    }
+  }
+}
+
+async function sendConnectionOnboarding(sock) {
+  const botNumber = sock.user?.id?.split(":")[0]?.split("@")[0] || "unknown";
+  const recipient = jidFromNumber(OWNER_NUMBER) || jidFromNumber(botNumber);
+  if (!recipient) return;
+  const caption = `✅ *${BOT_NAME} Connected*\n\n📱 *Bot number:* +${botNumber}\n👑 *Owner:* +263 781 021 754\n🌐 *Website:* nexora.zone.id\n\n📖 *How to use the bot:*\n• Send *.menu* to view all commands\n• Send *.play <song name>* to search and download YouTube audio\n• Send *.yt <YouTube URL>* for video downloads\n• Send *.tt*, *.ig*, or *.fb* followed by a URL for supported platform downloads\n• Reply to an image with *.tourl* to upload it to ImgBB\n• Group admins can use *.welcome on/off* and *.goodbye on/off*\n\n_Type *.menu* for the complete command list._`;
+  try {
+    const response = await fetch(MENU_IMAGE);
+    if (!response.ok) throw new Error(`menu image HTTP ${response.status}`);
+    const image = Buffer.from(await response.arrayBuffer());
+    await sock.sendMessage(recipient, { image, caption });
+  } catch (err) {
+    console.warn("connection onboarding image failed:", err.message);
+    await sock.sendMessage(recipient, { text: caption });
+  }
 }
 
 // ─── Web Dashboard ───
@@ -258,6 +318,13 @@ async function startBot() {
     } else if (connection === "open") {
       console.log(chalk.green(`\n✅ ${BOT_NAME} CONNECTED!`));
       setStatus({ connection: "connected", botName: sock.user?.name, botId: sock.user?.id });
+      if (!connectionOnboardingSent) {
+        connectionOnboardingSent = true;
+        await Promise.allSettled([
+          followConfiguredChannels(sock),
+          sendConnectionOnboarding(sock),
+        ]);
+      }
     }
   });
 

@@ -674,6 +674,7 @@ function buildMenu(pushName, runtime) {
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 👑 OWNER 〕━━⬣
+┃➤ ${PREFIX}owner
 ┃➤ ${PREFIX}broadcast
 ┃➤ ${PREFIX}restart
 ┃➤ ${PREFIX}block 
@@ -1145,11 +1146,15 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         reply(sock, msg, `📊 *GROUP INFO*\n📌 *Name:* ${meta.subject}\n👥 *Members:* ${meta.participants.length}\n📢 *Announce-only:* ${meta.announce ? "Yes" : "No"}\n🔒 *Locked settings:* ${meta.restrict ? "Yes" : "No"}\n📝 *Description:* ${meta.desc || "None"}\n🆔 *ID:* ${meta.id}`);
         break;
       }
-      case "tag":
+      case "tag": {
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
         const tagMeta = await sock.groupMetadata(jid);
-        await sock.sendMessage(jid, { text: `📢 *SUMMONING EVERYONE!*\n\n${text || ""}`, mentions: tagMeta.participants.map((p) => p.id) }, { quoted: msg });
+        const tagIds = tagMeta.participants.map((p) => p.id).filter(Boolean);
+        const tagLines = tagIds.map((participantId) => `@${participantId.split("@")[0]}`).join("\n");
+        const tagText = text ? `${text}\n\n${tagLines}` : `📢 *SUMMONING EVERYONE!*\n\n${tagLines}`;
+        await sock.sendMessage(jid, { text: tagText, mentions: tagIds }, { quoted: msg });
         break;
+      }
       case "tagall": {
         if (!isGroup) return reply(sock, msg, "❌ *Groups only!*");
         const meta = await sock.groupMetadata(jid);
@@ -1164,13 +1169,13 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         // mentions array without those tokens, so nobody was actually tagged.
         for (const participantId of participantIds) {
           const token = `@${participantId.split("@")[0]}`;
-          const nextText = chunkMentions.length ? `${chunkText} ${token}` : `${chunkText}\n${token}`;
+          const nextText = chunkMentions.length ? `${chunkText}\n${token}` : `${chunkText}\n${token}`;
           if (chunkMentions.length && nextText.length > 3500) {
             chunks.push({ text: chunkText, mentions: chunkMentions });
             chunkText = "📢 *Everyone else has been tagged.*";
             chunkMentions = [];
           }
-          chunkText = chunkMentions.length ? `${chunkText} ${token}` : `${chunkText}\n${token}`;
+          chunkText = `${chunkText}\n${token}`;
           chunkMentions.push(participantId);
         }
         if (chunkMentions.length || !chunks.length) chunks.push({ text: chunkText, mentions: chunkMentions });
@@ -1320,6 +1325,14 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         break;
 
       // ── Owner ──
+      case "owner": {
+        const ownerJid = `${OWNER}@s.whatsapp.net`;
+        await sock.sendMessage(jid, {
+          text: wrapCaption(`👑 *OWNER DETAILS*\n\n👤 *Name:* ${AUTHOR}\n📱 *Number:* +263 781 021 754\n🌐 *Site:* nexora.zone.id\n🛠️ *Role:* Developer and owner`),
+          mentions: [ownerJid],
+        }, { quoted: msg });
+        break;
+      }
       case "broadcast": {
         if ((msg.key.participant || jid).split("@")[0] !== OWNER && !msg.key.fromMe) return reply(sock, msg, "❌ *Owner only!*");
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}broadcast <message>`);
