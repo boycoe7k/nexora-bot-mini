@@ -11,7 +11,7 @@ const {
 const PREFIX = process.env.PREFIX || ".";
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Boycoe-dev";
-const MENU_IMAGE = "https://i.ibb.co/JR7L0Mtd/4eb100a2-65ed-4607-8b68-26280d75f6b9.jpg";
+const MENU_IMAGE = "https://i.ibb.co/xtLwMf12/file-00000000561c824699096bbdc5566486.png";
 const OWNER = process.env.OWNER_NUMBER || "263781021754";
 const KICKALL_DELAY_MS = parseInt(process.env.KICKALL_DELAY_MS || "4000", 10);
 
@@ -32,6 +32,8 @@ const NUMBERS_API = "https://nexa-numbers.onrender.com";
 const API_KEY = process.env.NEXA_VDL_API_KEY || process.env.API_KEY || "";
 const REMOVEBG_KEY = process.env.REMOVEBG_KEY || "";
 const UNSPLASH_KEY = process.env.UNSPLASH_KEY || "";
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY || "";
+const IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload";
 
 const headers = {
   "Content-Type": "application/json",
@@ -86,11 +88,10 @@ function backendErrorText(err) {
 function describeVdlError(err) {
   const status = err?.response?.status;
   const detail = backendErrorText(err);
-  if (status === 502 || status === 503 || status === 504) {
-    return `VDL server is temporarily unavailable (HTTP ${status}). Please try again in a few seconds.`;
-  }
-  if (status) return `VDL returned HTTP ${status}${detail ? `: ${detail}` : ""}`;
-  return detail || err?.message || "Download failed";
+  const message = status
+    ? `VDL returned HTTP ${status}${detail ? `: ${detail}` : ""}`
+    : detail || err?.message || "Download failed";
+  return message.replace(/https?:\/\/\S+/gi, "[link hidden]");
 }
 
 async function vdlGet(url, options = {}) {
@@ -310,7 +311,7 @@ async function runVideoOp(sock, msg, op, params = {}, format = "mp4") {
 // ── Nexa VDL (video/audio downloader) ────────────────────────────────────────
 async function downloadMedia(sock, msg, url, type = "video") {
   const jid = msg.key.remoteJid;
-  await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🔗 *URL:* ${url}\n🛠️ *Type:* ${type.toUpperCase()}`);
+  await reply(sock, msg, `⏳ *Nexora is processing your request...*\n🛠️ *Type:* ${type.toUpperCase()}`);
   try {
     const dlRes = await vdlStartDownload({ url, type, quality: "720p" });
     if (!dlRes.data.success) throw new Error(dlRes.data.error || "Download request failed");
@@ -354,8 +355,7 @@ async function youtubeSearch(sock, msg, query, autoDownloadType = null) {
     const info = `🎬 *YouTube Search Results*
 
 📌 *Title:* ${first.title}
-⏱️ *Duration:* ${first.duration}
-🔗 *URL:* ${first.url}`;
+⏱️ *Duration:* ${first.duration}`;
     try {
       const buf = await urlToBuffer(first.thumbnail);
       await sock.sendMessage(jid, { image: buf, caption: wrapCaption(info) }, { quoted: msg });
@@ -543,10 +543,12 @@ function buildMenu(pushName, runtime) {
 ┃ [] RUNTIME : ${runtime}
 ┃ [] USER    : ${pushName}
 ┃ [] DEV     : ${AUTHOR}
+┃ [] SITE    : nexora.zone.id
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 📥 DOWNLOADS 〕━━⬣
 ┃➤ ${PREFIX}yt
+┃➤ ${PREFIX}play <query>
 ┃➤ ${PREFIX}song 
 ┃➤ ${PREFIX}video 
 ┃➤ ${PREFIX}tt
@@ -596,6 +598,7 @@ function buildMenu(pushName, runtime) {
 ┃➤ ${PREFIX}enhance
 ┃➤ ${PREFIX}blur
 ┃➤ ${PREFIX}removebg
+┃➤ ${PREFIX}tourl
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
   ╭━━〔 🎙️ VOICE & AI 〕━━⬣
@@ -635,6 +638,8 @@ function buildMenu(pushName, runtime) {
 ╰━━━━━━━━━━━━━━━━━━━━⬣
 
 ╭━━〔 ⚙️ SETTINGS 〕━━⬣
+┃➤ ${PREFIX}welcome on/off
+┃➤ ${PREFIX}goodbye on/off
 ┃➤ ${PREFIX}autoreact 
 ┃➤ ${PREFIX}autostatus 
 ┃➤ ${PREFIX}antibadword 
@@ -829,6 +834,7 @@ async function handleCommand(sock, msg, { startTime, settings }) {
           await youtubeSearch(sock, msg, text);
         }
         break;
+      case "play":
       case "song":
       case "mp3":
         if (!text) return reply(sock, msg, `❓ *Usage:* ${PREFIX}${cmd} <query|url>`);
@@ -1174,6 +1180,30 @@ async function handleCommand(sock, msg, { startTime, settings }) {
         }
         break;
       }
+      case "tourl": {
+        if (!IMGBB_API_KEY || IMGBB_API_KEY === "YOUR_IMGBB_API_KEY_HERE") {
+          return reply(sock, msg, "❌ *ImgBB is not configured.* Set `IMGBB_API_KEY` in the bot environment first.");
+        }
+        const image = await getQuotedOrDirectMedia(msg, "image");
+        if (!image) return reply(sock, msg, `❓ *Usage:* Reply to an image with ${PREFIX}tourl`);
+        try {
+          const form = new FormData();
+          form.append("image", image, { filename: "upload.jpg", contentType: "application/octet-stream" });
+          const uploaded = await axios.post(IMGBB_UPLOAD_URL, form, {
+            params: { key: IMGBB_API_KEY },
+            headers: form.getHeaders(),
+            maxContentLength: 34 * 1024 * 1024,
+            maxBodyLength: 34 * 1024 * 1024,
+            timeout: 60000,
+          });
+          const publicUrl = uploaded.data?.data?.url || uploaded.data?.data?.display_url;
+          if (!uploaded.data?.success || !publicUrl) throw new Error(uploaded.data?.error?.message || "ImgBB upload failed");
+          await reply(sock, msg, `✅ *Image uploaded successfully.*\n🔗 ${publicUrl}`);
+        } catch (err) {
+          await reply(sock, msg, `❌ *Image upload failed:* ${err.response?.data?.error?.message || err.message}`);
+        }
+        break;
+      }
       case "vv": {
         const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         if (!quoted) return reply(sock, msg, `❌ *Reply to a view-once photo, video, or voice note with* \`${PREFIX}vv\``);
@@ -1199,6 +1229,8 @@ async function handleCommand(sock, msg, { startTime, settings }) {
       }
 
       // ── Settings ──
+      case "welcome":
+      case "goodbye":
       case "autoreact":
       case "autostatus":
       case "antibadword":

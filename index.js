@@ -37,6 +37,8 @@ const settings = {
   antilink: false,
   antidelete: false,
   anticall: false,
+  welcome: false,
+  goodbye: false,
 };
 
 const messageStore = {};
@@ -260,6 +262,30 @@ async function startBot() {
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  // Greet new members and say goodbye to departing members when enabled.
+  // Baileys emits one participant update containing string JIDs; normalize
+  // object-shaped entries too for compatibility with alternate event versions.
+  sock.ev.on("group-participants.update", async (update) => {
+    const action = update?.action;
+    const enabled = action === "add" ? settings.welcome : action === "remove" ? settings.goodbye : false;
+    if (!enabled || !update?.id) return;
+    const participantIds = (update.participants || [])
+      .map((participant) => typeof participant === "string" ? participant : participant?.id)
+      .filter(Boolean);
+    if (!participantIds.length) return;
+    try {
+      const meta = await sock.groupMetadata(update.id);
+      const names = participantIds.map((participantId) => `@${participantId.split("@")[0]}`);
+      const isWelcome = action === "add";
+      const text = isWelcome
+        ? `👋 *Welcome ${names.join(", ")}!*\n\nYou are now in *${meta.subject || "the group"}*. Please read the group rules and enjoy your stay.`
+        : `👋 *Goodbye ${names.join(", ")}.*\n\nYou have left *${meta.subject || "the group"}*.`;
+      await sock.sendMessage(update.id, { text, mentions: participantIds });
+    } catch (err) {
+      console.error(`group ${action}: greeting failed:`, err.message);
+    }
+  });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
     if (type !== "notify") return;
