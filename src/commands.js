@@ -12,7 +12,7 @@ const PREFIX = process.env.PREFIX || ".";
 const BOT_NAME = "Nexora Bot Mini";
 const AUTHOR = "Boycoe-dev";
 const MENU_IMAGE = "https://i.ibb.co/xtLwMf12/file-00000000561c824699096bbdc5566486.png";
-const OWNER = process.env.OWNER_NUMBER || "263781021754";
+const OWNER = (process.env.OWNER_NUMBER || "").replace(/\D/g, "");
 const KICKALL_DELAY_MS = parseInt(process.env.KICKALL_DELAY_MS || "4000", 10);
 
 // Tracks an in-progress .kickall per group so .kill can interrupt it between
