@@ -1,7 +1,7 @@
 {
   "name": "nexora-bot-mini",
-  "version": "1.0.0",
-  "description": "Nexora Bot Mini - Professional WhatsApp Bot with Management & Downloader Tools",
+  "version": "1.1.0",
+  "description": "Nexora Bot Mini - multi-session WhatsApp bot with pairing site and management tools",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^6.7.23",
+    "@whiskeysockets/baileys": "6.7.24",
     "axios": "^1.6.8",
     "chalk": "^4.1.2",
     "dotenv": "^16.4.5",
@@ -32,9 +32,9 @@
     "multi-device",
     "nexora"
   ],
-  "author": "Shadow Dev",
+  "author": "Boycoe-dev",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20 <25"
   }
 }

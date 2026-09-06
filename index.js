@@ -4,10 +4,7 @@ const {
     default: makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
-    fetchLatestWaWebVersion,
-    jidDecode,
-    downloadContentFromMessage,
-    proto
+    fetchLatestWaWebVersion
 } = require("@whiskeysockets/baileys");
 
 const P = require("pino");
@@ -16,75 +13,40 @@ const fs = require("fs");
 const path = require("path");
 const chalk = require("chalk");
 const figlet = require("figlet");
-const qrcode = require("qrcode-terminal");
+const qrcodeTerminal = require("qrcode-terminal");
 const QRCode = require("qrcode");
 const express = require("express");
 
 const { handleCommand } = require("./src/commands");
 
 // ============================================================
-// CONFIG
+// NEXORA MULTI-SESSION CONFIG
 // ============================================================
 
 const BOT_NAME = process.env.BOT_NAME || "Nexora Bot Mini";
 const AUTHOR = process.env.AUTHOR || "Boycoe-dev";
-
+const PREFIX = process.env.PREFIX || ".";
 const PORT = Number(process.env.PORT) || 3000;
+const MAX_SESSIONS = 3;
 
-const SESSION_DIR = path.resolve(
-    process.env.SESSION_DIR || "./session"
-);
-
-// IMPORTANT:
-// No hardcoded owner number anymore.
-// Set OWNER_NUMBER in your .env file.
 const OWNER_NUMBER = String(process.env.OWNER_NUMBER || "")
     .replace(/\D/g, "");
 
-if (!OWNER_NUMBER) {
-    console.warn(
-        chalk.yellow(
-            "⚠️ OWNER_NUMBER is not configured. Owner-only features will be unavailable."
-        )
-    );
-}
-
-// Dashboard authentication token.
-// REQUIRED for destructive/admin dashboard operations.
 const DASHBOARD_TOKEN = String(
     process.env.DASHBOARD_TOKEN || ""
 ).trim();
 
-if (!DASHBOARD_TOKEN) {
-    console.warn(
-        chalk.yellow(
-            "⚠️ DASHBOARD_TOKEN is not configured. /reset will remain disabled."
-        )
-    );
-}
+// Render Free has an ephemeral filesystem. SESSION_ROOT can be changed
+// later to a persistent storage location on a paid Render disk.
+const SESSION_ROOT = path.resolve(
+    process.env.SESSION_ROOT ||
+    (process.env.RENDER ? "/tmp/nexora-sessions" : "./sessions")
+);
 
-// External menu image.
-const MENU_IMAGE =
-    process.env.MENU_IMAGE ||
-    "https://i.ibb.co/your-menu-image";
+const MENU_IMAGE = process.env.MENU_IMAGE ||
+    "https://i.ibb.co/xtLwMf12/file-00000000561c824699096bbdc5566486.png";
 
-// ============================================================
-// WHATSAPP CHANNELS
-// ============================================================
-
-const AUTO_FOLLOW_CHANNELS = [
-    "https://whatsapp.com/channel/0029VaYOURCHANNEL1",
-    "https://whatsapp.com/channel/0029VaYOURCHANNEL2",
-    "https://whatsapp.com/channel/0029VaYOURCHANNEL3",
-    "https://whatsapp.com/channel/0029VaYOURCHANNEL4",
-    "https://whatsapp.com/channel/0029VaYOURCHANNEL5"
-];
-
-// ============================================================
-// SETTINGS
-// ============================================================
-
-const settings = {
+const settingsDefaults = {
     autoreact: false,
     autostatus: true,
     antibadword: false,
@@ -95,98 +57,107 @@ const settings = {
     goodbye: false
 };
 
-// ============================================================
-// RUNTIME STORAGE
-// ============================================================
+if (!OWNER_NUMBER) {
+    console.warn(chalk.yellow(
+        "⚠️ OWNER_NUMBER is not configured. Owner-only commands will be unavailable."
+    ));
+}
 
-const messageStore = new Map();
-const linkWarnings = new Map();
-
-const MAX_LINK_WARNINGS = 3;
-
-// WhatsApp URL detection.
-const LINK_REGEX =
-    /(https?:\/\/[^\s]+|www\.[^\s]+|chat\.whatsapp\.com\/[^\s]+)/i;
-
-// Keep memory from growing forever.
-const MAX_STORED_MESSAGES = 1000;
+if (!DASHBOARD_TOKEN) {
+    console.warn(chalk.yellow(
+        "⚠️ DASHBOARD_TOKEN is not configured. Protected session-management endpoints are disabled."
+    ));
+}
 
 // ============================================================
-// STATUS
+// SESSION STATE
 // ============================================================
 
-const status = {
-    connection: "starting",
-    pairingCode: null,
-    qrCodeSvg: null,
-    botName: BOT_NAME,
-    botId: null,
-    browser: null,
-    lastUpdate: null
-};
+const sessions = new Map();
 
-let globalSock = null;
-let onboardingSent = false;
-let restarting = false;
+function sessionDir(slot) {
+    return path.join(SESSION_ROOT, `session-${slot}`);
+}
 
-// ============================================================
-// HELPERS
-// ============================================================
+function createSessionState(slot) {
+    return {
+        slot,
+        sock: null,
+        reconnectTimer: null,
+        reconnectAttempts: 0,
+        pairingCode: null,
+        qrDataUrl: null,
+        connection: "idle",
+        botId: null,
+        name: null,
+        lastUpdate: new Date().toISOString(),
+        settings: { ...settingsDefaults },
+        messageStore: new Map(),
+        linkWarnings: new Map(),
+        pairingInProgress: false,
+        stopping: false
+    };
+}
 
-function setStatus(updates = {}) {
-    Object.assign(status, updates, {
+for (let slot = 1; slot <= MAX_SESSIONS; slot++) {
+    sessions.set(slot, createSessionState(slot));
+}
+
+function setSessionStatus(state, updates = {}) {
+    Object.assign(state, updates, {
         lastUpdate: new Date().toISOString()
     });
 }
 
-function jidFromNumber(number) {
-    const clean = String(number || "").replace(/\D/g, "");
-
-    if (!clean) return null;
-
-    return `${clean}@s.whatsapp.net`;
+function publicSession(state) {
+    return {
+        slot: state.slot,
+        connection: state.connection,
+        botId: state.botId,
+        name: state.name,
+        pairingCode: state.pairingCode,
+        qrDataUrl: state.qrDataUrl,
+        lastUpdate: state.lastUpdate,
+        uptime: process.uptime()
+    };
 }
 
-function normalizePhone(number) {
-    return String(number || "").replace(/\D/g, "");
-}
-
-function channelInviteCode(url) {
-    try {
-        const match = String(url || "").match(
-            /whatsapp\.com\/channel\/([^/?]+)/i
-        );
-
-        return match ? match[1] : null;
-    } catch {
+function getSlot(value) {
+    const slot = Number(value);
+    if (!Number.isInteger(slot) || slot < 1 || slot > MAX_SESSIONS) {
         return null;
+    }
+    return slot;
+}
+
+function hasCredentials(slot) {
+    return fs.existsSync(path.join(sessionDir(slot), "creds.json"));
+}
+
+function ensureSessionDir(slot) {
+    fs.mkdirSync(sessionDir(slot), { recursive: true });
+}
+
+function removeSessionFiles(slot) {
+    const dir = sessionDir(slot);
+    if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
     }
 }
 
 // ============================================================
-// DASHBOARD AUTH
+// SECURITY / RATE LIMITING
 // ============================================================
 
 function getDashboardToken(req) {
     const authorization = req.get("authorization");
-
     if (authorization) {
-        const match = authorization.match(
-            /^Bearer\s+(.+)$/i
-        );
-
-        if (match) {
-            return match[1].trim();
-        }
+        const match = authorization.match(/^Bearer\s+(.+)$/i);
+        if (match) return match[1].trim();
     }
 
     const headerToken = req.get("x-dashboard-token");
-
-    if (headerToken) {
-        return headerToken.trim();
-    }
-
-    return null;
+    return headerToken ? headerToken.trim() : null;
 }
 
 function requireDashboardToken(req, res, next) {
@@ -197,9 +168,7 @@ function requireDashboardToken(req, res, next) {
         });
     }
 
-    const provided = getDashboardToken(req);
-
-    if (!provided || provided !== DASHBOARD_TOKEN) {
+    if (getDashboardToken(req) !== DASHBOARD_TOKEN) {
         return res.status(401).json({
             success: false,
             error: "Unauthorized."
@@ -209,1260 +178,571 @@ function requireDashboardToken(req, res, next) {
     next();
 }
 
-// ============================================================
-// RATE LIMITING
-// ============================================================
-
 const pairAttempts = new Map();
-
 const PAIR_WINDOW_MS = 60 * 1000;
 const MAX_PAIR_ATTEMPTS = 5;
 
 function checkPairRateLimit(ip) {
     const now = Date.now();
-
     const current = pairAttempts.get(ip);
 
-    if (!current || now - current.startedAt > PAIR_WINDOW_MS) {
-        pairAttempts.set(ip, {
-            startedAt: now,
-            count: 1
-        });
-
+    if (!current || now - current.startedAt >= PAIR_WINDOW_MS) {
+        pairAttempts.set(ip, { startedAt: now, count: 1 });
         return true;
     }
 
-    if (current.count >= MAX_PAIR_ATTEMPTS) {
-        return false;
-    }
-
+    if (current.count >= MAX_PAIR_ATTEMPTS) return false;
     current.count++;
-
     return true;
 }
 
-// Periodically remove old rate-limit entries.
 setInterval(() => {
     const now = Date.now();
-
-    for (const [ip, data] of pairAttempts.entries()) {
-        if (now - data.startedAt > PAIR_WINDOW_MS) {
+    for (const [ip, data] of pairAttempts) {
+        if (now - data.startedAt >= PAIR_WINDOW_MS) {
             pairAttempts.delete(ip);
         }
     }
 }, PAIR_WINDOW_MS).unref();
 
 // ============================================================
-// MESSAGE STORE
+// MESSAGE / GROUP HELPERS
 // ============================================================
 
-function storeMessage(message) {
+const LINK_REGEX = /(https?:\/\/[^\s]+|www\.[^\s]+|chat\.whatsapp\.com\/[^\s]+)/i;
+const MAX_LINK_WARNINGS = 3;
+const MAX_STORED_MESSAGES = 200;
+
+function storeMessage(state, message) {
     if (!message?.key?.id) return;
+    state.messageStore.set(message.key.id, message);
 
-    const id = message.key.id;
-
-    messageStore.set(id, message);
-
-    while (messageStore.size > MAX_STORED_MESSAGES) {
-        const oldestKey = messageStore.keys().next().value;
-
-        if (oldestKey) {
-            messageStore.delete(oldestKey);
-        } else {
-            break;
-        }
+    while (state.messageStore.size > MAX_STORED_MESSAGES) {
+        const oldest = state.messageStore.keys().next().value;
+        if (!oldest) break;
+        state.messageStore.delete(oldest);
     }
 }
 
+function getMessageText(message) {
+    return (
+        message?.message?.conversation ||
+        message?.message?.extendedTextMessage?.text ||
+        message?.message?.imageMessage?.caption ||
+        message?.message?.videoMessage?.caption ||
+        ""
+    );
+}
+
 // ============================================================
-// EXPRESS DASHBOARD
+// PAIRING WEBSITE
+// ============================================================
+
+const PAIRING_HTML = fs.readFileSync(path.join(__dirname, "public", "pairing.html"), "utf8");
+
+// ============================================================
+// EXPRESS SERVER
 // ============================================================
 
 const app = express();
-
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "1mb" }));
 
-app.use(express.json({
-    limit: "1mb"
-}));
+app.get("/", (req, res) => res.type("html").send(PAIRING_HTML));
 
-// ------------------------------------------------------------
-// Basic health endpoint
-// ------------------------------------------------------------
-
-app.get("/", (req, res) => {
+app.get("/health", (req, res) => {
     res.json({
         success: true,
         name: BOT_NAME,
-        status: status.connection,
+        sessions: [...sessions.values()].map(s => ({
+            slot: s.slot,
+            connection: s.connection
+        })),
         uptime: process.uptime()
     });
 });
 
-// ------------------------------------------------------------
-// Public sanitized status
-// ------------------------------------------------------------
-
-app.get("/status", (req, res) => {
+app.get("/api/sessions", (req, res) => {
     res.json({
         success: true,
-        botName: status.botName,
-        botId: status.botId,
-        connection: status.connection,
-        browser: status.browser,
-        lastUpdate: status.lastUpdate,
-        uptime: process.uptime()
+        maxSessions: MAX_SESSIONS,
+        sessions: [...sessions.values()].map(publicSession)
     });
 });
-
-// ------------------------------------------------------------
-// Authenticated dashboard status
-// ------------------------------------------------------------
-
-app.get(
-    "/api/status",
-    requireDashboardToken,
-    (req, res) => {
-        res.json({
-            success: true,
-            ...status,
-            settings,
-            uptime: process.uptime()
-        });
-    }
-);
-
-// ------------------------------------------------------------
-// Pairing
-// ------------------------------------------------------------
 
 app.post("/api/pair", async (req, res) => {
     try {
-        const ip =
-            req.ip ||
-            req.socket?.remoteAddress ||
-            "unknown";
-
+        const ip = req.ip || req.socket?.remoteAddress || "unknown";
         if (!checkPairRateLimit(ip)) {
             return res.status(429).json({
                 success: false,
-                error:
-                    "Too many pairing attempts. Please wait one minute."
+                error: "Too many pairing attempts. Please wait one minute."
             });
         }
 
-        if (!globalSock) {
-            return res.status(503).json({
-                success: false,
-                error: "WhatsApp socket is not ready."
-            });
+        const slot = getSlot(req.body?.slot);
+        const phone = String(req.body?.phone || "").replace(/\D/g, "");
+
+        if (!slot) {
+            return res.status(400).json({ success: false, error: "Choose session 1, 2, or 3." });
         }
 
-        if (!globalSock.requestPairingCode) {
-            return res.status(503).json({
-                success: false,
-                error:
-                    "Pairing codes are not available right now."
-            });
+        if (phone.length < 8 || phone.length > 15) {
+            return res.status(400).json({ success: false, error: "Enter a valid phone number with country code." });
         }
 
-        let phone = normalizePhone(
-            req.body?.phone
-        );
-
-        // Prevent obviously invalid input.
-        if (!phone || phone.length < 8 || phone.length > 15) {
-            return res.status(400).json({
-                success: false,
-                error:
-                    "Enter a valid phone number with country code."
-            });
+        const state = sessions.get(slot);
+        if (state.pairingInProgress) {
+            return res.status(409).json({ success: false, error: "Pairing is already being generated for this slot." });
         }
 
-        // Avoid trying to pair when already connected.
-        if (status.connection === "open") {
-            return res.status(409).json({
-                success: false,
-                error: "Bot is already connected."
-            });
+        if (state.connection === "open") {
+            return res.status(409).json({ success: false, error: "This session is already connected." });
         }
 
-        // Small delay gives Baileys time to initialize.
-        await new Promise(resolve =>
-            setTimeout(resolve, 2000)
-        );
+        state.pairingInProgress = true;
 
-        const code =
-            await globalSock.requestPairingCode(phone);
+        if (state.sock) {
+            try { state.stopping = true; state.sock.end(new Error("Replacing session for pairing")); } catch {}
+            state.sock = null;
+        }
 
-        status.pairingCode = code;
-
-        setStatus({
-            pairingCode: code
+        // A logged-out/failed session cannot be reused safely.
+        removeSessionFiles(slot);
+        state.messageStore.clear();
+        state.linkWarnings.clear();
+        state.reconnectAttempts = 0;
+        setSessionStatus(state, {
+            connection: "pairing",
+            pairingCode: null,
+            qrDataUrl: null,
+            botId: null,
+            name: null
         });
 
-        return res.json({
-            success: true,
-            code
-        });
+        const sock = await createSocket(state, true);
+        await new Promise(resolve => setTimeout(resolve, 1800));
 
+        if (!sock.requestPairingCode) {
+            throw new Error("Pairing codes are unavailable in this Baileys build.");
+        }
+
+        const code = await sock.requestPairingCode(phone);
+        state.pairingCode = code;
+        state.pairingInProgress = false;
+        setSessionStatus(state, { connection: "pairing", pairingCode: code });
+
+        return res.json({ success: true, slot, code });
     } catch (error) {
-        console.error(
-            chalk.red("Pairing error:"),
-            error
-        );
+        const slot = getSlot(req.body?.slot);
+        if (slot) {
+            const state = sessions.get(slot);
+            state.pairingInProgress = false;
+            setSessionStatus(state, { connection: "idle", pairingCode: null, qrDataUrl: null });
+        }
 
+        console.error(chalk.red("Pairing error:"), error);
         return res.status(500).json({
             success: false,
-            error:
-                error?.message ||
-                "Failed to generate pairing code."
+            error: error?.message || "Failed to generate pairing code."
         });
     }
 });
 
-// ------------------------------------------------------------
-// SECURE RESET
-// ------------------------------------------------------------
-//
-// IMPORTANT:
-// This endpoint used to be publicly accessible.
-// It now:
-//   - requires DASHBOARD_TOKEN
-//   - requires POST
-//   - deletes the session only after authentication
-// ------------------------------------------------------------
+app.get("/api/admin/sessions", requireDashboardToken, (req, res) => {
+    res.json({
+        success: true,
+        sessions: [...sessions.values()].map(s => ({
+            ...publicSession(s),
+            settings: s.settings
+        }))
+    });
+});
 
-app.post(
-    "/reset",
-    requireDashboardToken,
-    async (req, res) => {
-        try {
-            if (restarting) {
-                return res.status(409).json({
-                    success: false,
-                    error: "Reset already in progress."
-                });
-            }
+app.post("/api/admin/logout", requireDashboardToken, async (req, res) => {
+    const slot = getSlot(req.body?.slot);
+    if (!slot) return res.status(400).json({ success: false, error: "Invalid session slot." });
 
-            restarting = true;
-
-            res.json({
-                success: true,
-                message:
-                    "Reset authorized. Restarting Nexora..."
-            });
-
-            setTimeout(() => {
-                try {
-                    if (fs.existsSync(SESSION_DIR)) {
-                        fs.rmSync(SESSION_DIR, {
-                            recursive: true,
-                            force: true
-                        });
-                    }
-
-                    console.log(
-                        chalk.yellow(
-                            "🧹 WhatsApp session removed."
-                        )
-                    );
-
-                    process.exit(0);
-                } catch (error) {
-                    console.error(
-                        chalk.red(
-                            "Failed to remove session:"
-                        ),
-                        error
-                    );
-
-                    process.exit(1);
-                }
-            }, 1000);
-
-        } catch (error) {
-            restarting = false;
-
-            console.error(
-                chalk.red("Reset error:"),
-                error
-            );
-
-            if (!res.headersSent) {
-                return res.status(500).json({
-                    success: false,
-                    error: "Reset failed."
-                });
-            }
+    const state = sessions.get(slot);
+    try {
+        state.stopping = true;
+        if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+        if (state.sock) {
+            try { state.sock.end(new Error("Session logged out from dashboard")); } catch {}
         }
+        removeSessionFiles(slot);
+        state.sock = null;
+        state.reconnectAttempts = 0;
+        state.pairingCode = null;
+        state.qrDataUrl = null;
+        state.botId = null;
+        state.name = null;
+        state.pairingInProgress = false;
+        state.messageStore.clear();
+        state.linkWarnings.clear();
+        state.settings = { ...settingsDefaults };
+        state.stopping = false;
+        setSessionStatus(state, { connection: "idle" });
+        return res.json({ success: true, slot });
+    } catch (error) {
+        return res.status(500).json({ success: false, error: error.message });
     }
-);
-
-// ------------------------------------------------------------
-// Start dashboard
-// ------------------------------------------------------------
+});
 
 app.listen(PORT, () => {
-    console.log(
-        chalk.green(
-            `🌐 Nexora dashboard running on port ${PORT}`
-        )
-    );
+    console.log(chalk.green(`🌐 Nexora pairing site running on port ${PORT}`));
 });
 
 // ============================================================
-// CHANNEL FOLLOWING
+// WHATSAPP SESSION ENGINE
 // ============================================================
 
-async function followConfiguredChannels(sock) {
-    if (!Array.isArray(AUTO_FOLLOW_CHANNELS)) {
+async function createSocket(state, pairingRequested = false) {
+    const slot = state.slot;
+    ensureSessionDir(slot);
+
+    const { state: authState, saveCreds } = await useMultiFileAuthState(sessionDir(slot));
+
+    let version;
+    try {
+        const latest = await fetchLatestWaWebVersion();
+        version = latest?.version;
+    } catch (error) {
+        console.warn(chalk.yellow(`⚠️ Session ${slot}: could not fetch latest WhatsApp Web version.`));
+    }
+
+    const sock = makeWASocket({
+        auth: authState,
+        logger: P({ level: process.env.LOG_LEVEL || "silent" }),
+        printQRInTerminal: false,
+        browser: ["Nexora", "Chrome", "1.0.0"],
+        ...(version ? { version } : {}),
+        generateHighQualityLinkPreview: true,
+        syncFullHistory: false,
+        markOnlineOnConnect: false
+    });
+
+    state.sock = sock;
+    state.stopping = false;
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", async update => {
+        await handleConnectionUpdate(state, update);
+    });
+
+    sock.ev.on("group-participants.update", async update => {
+        await handleGroupParticipants(state, update);
+    });
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        await handleMessages(state, messages);
+    });
+
+    sock.ev.on("messages.update", async updates => {
+        await handleDeletedMessages(state, updates);
+    });
+
+    sock.ev.on("call", async calls => {
+        await handleCalls(state, calls);
+    });
+
+    if (pairingRequested) {
+        setSessionStatus(state, { connection: "pairing" });
+    }
+
+    return sock;
+}
+
+async function handleConnectionUpdate(state, update) {
+    const { connection, lastDisconnect, qr } = update;
+    const sock = state.sock;
+
+    if (connection) setSessionStatus(state, { connection });
+
+    if (qr) {
+        try {
+            qrcodeTerminal.generate(qr, { small: true });
+            state.qrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 });
+            setSessionStatus(state, { qrDataUrl: state.qrDataUrl, connection: "pairing" });
+        } catch (error) {
+            console.error(chalk.red(`Session ${state.slot} QR error:`), error);
+        }
+    }
+
+    if (connection === "open") {
+        state.reconnectAttempts = 0;
+        state.pairingInProgress = false;
+        setSessionStatus(state, {
+            connection: "open",
+            botId: sock?.user?.id || null,
+            name: sock?.user?.name || null,
+            pairingCode: null,
+            qrDataUrl: null
+        });
+        console.log(chalk.green(`✅ Session ${state.slot} connected: ${state.botId || "WhatsApp"}`));
         return;
     }
 
-    for (const channel of AUTO_FOLLOW_CHANNELS) {
-        try {
-            const code = channelInviteCode(channel);
+    if (connection !== "close") return;
 
-            if (!code) continue;
+    const statusCode = new Boom(lastDisconnect?.error)?.output?.statusCode;
+    console.log(chalk.yellow(`⚠️ Session ${state.slot} closed. Code: ${statusCode || "unknown"}`));
 
-            // Baileys may not expose channel following
-            // depending on version. Keep this optional.
-            if (
-                typeof sock.newsletterFollow ===
-                "function"
-            ) {
-                await sock.newsletterFollow(code);
+    state.sock = null;
+    state.pairingInProgress = false;
 
-                console.log(
-                    chalk.green(
-                        `✓ Followed channel: ${code}`
-                    )
-                );
-            }
-        } catch (error) {
-            console.log(
-                chalk.gray(
-                    `Could not follow channel: ${channel}`
-                )
-            );
-        }
-    }
-}
-
-// ============================================================
-// CONNECTION ONBOARDING
-// ============================================================
-
-async function sendConnectionOnboarding(sock) {
-    if (onboardingSent) return;
-
-    onboardingSent = true;
-
-    try {
-        const ownerText = OWNER_NUMBER
-            ? `Owner: +${OWNER_NUMBER}`
-            : "Owner: Not configured";
-
-        const caption = `
-╭━━━〔 ${BOT_NAME} 〕━━━╮
-┃
-┃  🤖 WhatsApp Multi-Device Bot
-┃
-┃  ${ownerText}
-┃  Developed by ${AUTHOR}
-┃
-┃  🌐 nexora.zone.id
-┃
-╰━━━━━━━━━━━━━━━━━━━━━━╯
-`;
-
-        const target =
-            sock.user?.id ||
-            jidFromNumber(OWNER_NUMBER);
-
-        if (!target) {
-            console.log(
-                chalk.yellow(
-                    "⚠️ No onboarding target available."
-                )
-            );
-
-            return;
-        }
-
-        await sock.sendMessage(target, {
-            text: caption
-        });
-
-    } catch (error) {
-        onboardingSent = false;
-
-        console.error(
-            chalk.red(
-                "Onboarding message failed:"
-            ),
-            error
-        );
-    }
-}
-
-// ============================================================
-// DISPLAY BANNER
-// ============================================================
-
-function showBanner() {
-    console.clear();
-
-    try {
-        console.log(
-            chalk.cyan(
-                figlet.textSync("NEXORA", {
-                    horizontalLayout: "default"
-                })
-            )
-        );
-    } catch {
-        console.log(
-            chalk.cyan(
-                "=============================="
-            )
-        );
-
-        console.log(
-            chalk.cyan("        NEXORA BOT")
-        );
-
-        console.log(
-            chalk.cyan(
-                "=============================="
-            )
-        );
+    if (state.stopping) {
+        setSessionStatus(state, { connection: "idle", pairingCode: null, qrDataUrl: null });
+        return;
     }
 
-    console.log(
-        chalk.gray(
-            `${BOT_NAME} • ${AUTHOR}`
-        )
-    );
-
-    console.log();
-}
-
-// ============================================================
-// START BOT
-// ============================================================
-
-async function startBot() {
-    try {
-        showBanner();
-
-        if (!fs.existsSync(SESSION_DIR)) {
-            fs.mkdirSync(SESSION_DIR, {
-                recursive: true
-            });
-        }
-
-        const {
-            state,
-            saveCreds
-        } = await useMultiFileAuthState(
-            SESSION_DIR
-        );
-
-        let version;
-
-        try {
-            const latest =
-                await fetchLatestWaWebVersion();
-
-            version = latest?.version;
-
-            if (version) {
-                console.log(
-                    chalk.gray(
-                        `WhatsApp Web version: ${version.join(".")}`
-                    )
-                );
-            }
-        } catch (error) {
-            console.log(
-                chalk.yellow(
-                    "⚠️ Could not fetch latest WhatsApp Web version."
-                )
-            );
-        }
-
-        const sock = makeWASocket({
-            auth: state,
-
-            logger: P({
-                level:
-                    process.env.LOG_LEVEL ||
-                    "silent"
-            }),
-
-            printQRInTerminal: false,
-
-            browser: [
-                "Nexora",
-                "Chrome",
-                "1.0.0"
-            ],
-
-            ...(version
-                ? { version }
-                : {}),
-
-            generateHighQualityLinkPreview:
-                true,
-
-            syncFullHistory: false,
-
-            markOnlineOnConnect: false
-        });
-
-        globalSock = sock;
-
-        setStatus({
-            connection: "connecting",
+    if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
+        removeSessionFiles(state.slot);
+        setSessionStatus(state, {
+            connection: statusCode === DisconnectReason.loggedOut ? "logged_out" : "bad_session",
             pairingCode: null,
-            qrCodeSvg: null,
+            qrDataUrl: null,
             botId: null
         });
-
-        // ----------------------------------------------------
-        // Save credentials
-        // ----------------------------------------------------
-
-        sock.ev.on(
-            "creds.update",
-            saveCreds
-        );
-
-        // ----------------------------------------------------
-        // Connection updates
-        // ----------------------------------------------------
-
-        sock.ev.on(
-            "connection.update",
-            async (update) => {
-                const {
-                    connection,
-                    lastDisconnect,
-                    qr
-                } = update;
-
-                if (connection) {
-                    setStatus({
-                        connection
-                    });
-                }
-
-                // --------------------------------------------
-                // QR
-                // --------------------------------------------
-
-                if (qr) {
-                    try {
-                        qrcode.generate(
-                            qr,
-                            {
-                                small: true
-                            }
-                        );
-
-                        status.qrCodeSvg =
-                            await QRCode.toString(
-                                qr,
-                                {
-                                    type: "svg"
-                                }
-                            );
-
-                        setStatus({
-                            qrCodeSvg:
-                                status.qrCodeSvg
-                        });
-
-                    } catch (error) {
-                        console.error(
-                            chalk.red(
-                                "QR generation failed:"
-                            ),
-                            error
-                        );
-                    }
-                }
-
-                // --------------------------------------------
-                // OPEN
-                // --------------------------------------------
-
-                if (connection === "open") {
-                    const botId =
-                        sock.user?.id ||
-                        null;
-
-                    setStatus({
-                        connection: "open",
-                        botId,
-                        pairingCode: null,
-                        qrCodeSvg: null,
-                        browser:
-                            sock.user?.name ||
-                            null
-                    });
-
-                    console.log(
-                        chalk.green(
-                            "\n✅ Nexora connected successfully!"
-                        )
-                    );
-
-                    onboardingSent = false;
-
-                    await followConfiguredChannels(
-                        sock
-                    );
-
-                    await sendConnectionOnboarding(
-                        sock
-                    );
-                }
-
-                // --------------------------------------------
-                // CLOSE
-                // --------------------------------------------
-
-                if (connection === "close") {
-                    const statusCode =
-                        new Boom(
-                            lastDisconnect?.error
-                        )?.output?.statusCode;
-
-                    console.log(
-                        chalk.red(
-                            `❌ WhatsApp connection closed. Code: ${statusCode}`
-                        )
-                    );
-
-                    setStatus({
-                        connection: "closed"
-                    });
-
-                    globalSock = null;
-
-                    // Logged out permanently.
-                    if (
-                        statusCode ===
-                        DisconnectReason.loggedOut
-                    ) {
-                        console.log(
-                            chalk.red(
-                                "🚪 WhatsApp session logged out."
-                            )
-                        );
-
-                        setStatus({
-                            connection:
-                                "logged_out"
-                        });
-
-                        return;
-                    }
-
-                    // Bad session.
-                    if (
-                        statusCode ===
-                        DisconnectReason.badSession
-                    ) {
-                        console.log(
-                            chalk.red(
-                                "⚠️ Bad session detected."
-                            )
-                        );
-
-                        return;
-                    }
-
-                    // Other disconnects should reconnect.
-                    if (!restarting) {
-                        console.log(
-                            chalk.yellow(
-                                "🔄 Reconnecting in 5 seconds..."
-                            )
-                        );
-
-                        setTimeout(() => {
-                            if (!restarting) {
-                                startBot().catch(
-                                    error => {
-                                        console.error(
-                                            chalk.red(
-                                                "Restart failed:"
-                                            ),
-                                            error
-                                        );
-                                    }
-                                );
-                            }
-                        }, 5000);
-                    }
-                }
-            }
-        );
-
-        // ----------------------------------------------------
-        // Group participant events
-        // ----------------------------------------------------
-
-        sock.ev.on(
-            "group-participants.update",
-            async update => {
-                try {
-                    const {
-                        id,
-                        participants,
-                        action
-                    } = update;
-
-                    if (!settings.welcome &&
-                        !settings.goodbye) {
-                        return;
-                    }
-
-                    const metadata =
-                        await sock.groupMetadata(
-                            id
-                        );
-
-                    for (const participant of participants) {
-                        const number =
-                            participant.split(
-                                "@"
-                            )[0];
-
-                        if (action === "add" &&
-                            settings.welcome) {
-                            await sock.sendMessage(
-                                id,
-                                {
-                                    text:
-                                        `👋 Welcome @${number} to *${metadata.subject}*!`,
-                                    mentions: [
-                                        participant
-                                    ]
-                                }
-                            );
-                        }
-
-                        if (
-                            action === "remove" &&
-                            settings.goodbye
-                        ) {
-                            await sock.sendMessage(
-                                id,
-                                {
-                                    text:
-                                        `👋 Goodbye @${number}!`,
-                                    mentions: [
-                                        participant
-                                    ]
-                                }
-                            );
-                        }
-                    }
-
-                } catch (error) {
-                    console.error(
-                        chalk.red(
-                            "Group participant handler error:"
-                        ),
-                        error
-                    );
-                }
-            }
-        );
-
-        // ----------------------------------------------------
-        // Incoming messages
-        // ----------------------------------------------------
-
-        sock.ev.on(
-            "messages.upsert",
-            async ({ messages }) => {
-                try {
-                    for (const msg of messages) {
-                        if (!msg?.message) {
-                            continue;
-                        }
-
-                        // ------------------------------------
-                        // Store messages for anti-delete
-                        // ------------------------------------
-
-                        if (
-                            settings.antidelete &&
-                            msg.key?.id
-                        ) {
-                            storeMessage(msg);
-                        }
-
-                        // ------------------------------------
-                        // Auto view WhatsApp status
-                        // ------------------------------------
-
-                        if (
-                            settings.autostatus &&
-                            msg.key?.remoteJid ===
-                            "status@broadcast"
-                        ) {
-                            try {
-                                await sock.readMessages([
-                                    msg.key
-                                ]);
-                            } catch {}
-                        }
-
-                        // ------------------------------------
-                        // Anti-link
-                        // ------------------------------------
-
-                        if (
-                            settings.antilink &&
-                            msg.key?.remoteJid?.endsWith(
-                                "@g.us"
-                            )
-                        ) {
-                            try {
-                                const text =
-                                    msg.message
-                                        ?.conversation ||
-                                    msg.message
-                                        ?.extendedTextMessage
-                                        ?.text ||
-                                    "";
-
-                                if (
-                                    LINK_REGEX.test(
-                                        text
-                                    )
-                                ) {
-                                    const groupJid =
-                                        msg.key.remoteJid;
-
-                                    const sender =
-                                        msg.key.participant;
-
-                                    const metadata =
-                                        await sock.groupMetadata(
-                                            groupJid
-                                        );
-
-                                    const senderParticipant =
-                                        metadata.participants.find(
-                                            p =>
-                                                p.id ===
-                                                sender
-                                        );
-
-                                    const senderNumber =
-                                        sender
-                                            ?.split(
-                                                "@"
-                                            )[0];
-
-                                    const botJid =
-                                        sock.user?.id;
-
-                                    const botNumber =
-                                        botJid
-                                            ?.split(
-                                                ":"
-                                            )[0]
-                                            ?.split(
-                                                "@"
-                                            )[0];
-
-                                    const isSenderAdmin =
-                                        senderParticipant
-                                            ?.admin;
-
-                                    const isBotAdmin =
-                                        metadata.participants.some(
-                                            p =>
-                                                p.id ===
-                                                    botJid ||
-                                                p.id?.startsWith(
-                                                    `${botNumber}@`
-                                                )
-                                        );
-
-                                    // Don't punish admins.
-                                    if (
-                                        isSenderAdmin ||
-                                        senderNumber ===
-                                            OWNER_NUMBER
-                                    ) {
-                                        continue;
-                                    }
-
-                                    // Need bot admin to delete.
-                                    if (
-                                        !isBotAdmin
-                                    ) {
-                                        continue;
-                                    }
-
-                                    try {
-                                        await sock.sendMessage(
-                                            groupJid,
-                                            {
-                                                delete:
-                                                    msg.key
-                                            }
-                                        );
-                                    } catch {}
-
-                                    const current =
-                                        (linkWarnings.get(
-                                            sender
-                                        ) || 0) + 1;
-
-                                    linkWarnings.set(
-                                        sender,
-                                        current
-                                    );
-
-                                    if (
-                                        current >=
-                                        MAX_LINK_WARNINGS
-                                    ) {
-                                        try {
-                                            await sock.groupParticipantsUpdate(
-                                                groupJid,
-                                                [
-                                                    sender
-                                                ],
-                                                "remove"
-                                            );
-
-                                            linkWarnings.delete(
-                                                sender
-                                            );
-                                        } catch (
-                                            removeError
-                                        ) {
-                                            console.error(
-                                                chalk.red(
-                                                    "Failed to remove link sender:"
-                                                ),
-                                                removeError
-                                            );
-                                        }
-                                    } else {
-                                        await sock.sendMessage(
-                                            groupJid,
-                                            {
-                                                text:
-                                                    `⚠️ @${senderNumber} links are not allowed here.\n\nWarning ${current}/${MAX_LINK_WARNINGS}`,
-                                                mentions: [
-                                                    sender
-                                                ]
-                                            }
-                                        );
-                                    }
-                                }
-
-                            } catch (
-                                antiLinkError
-                            ) {
-                                console.error(
-                                    chalk.red(
-                                        "Anti-link error:"
-                                    ),
-                                    antiLinkError
-                                );
-                            }
-                        }
-
-                        // ------------------------------------
-                        // Command handler
-                        // ------------------------------------
-
-                        try {
-                            await handleCommand(
-                                sock,
-                                msg,
-                                {
-                                    startTime:
-                                        process.uptime(),
-                                    settings
-                                }
-                            );
-                        } catch (commandError) {
-                            console.error(
-                                chalk.red(
-                                    "Command handler error:"
-                                ),
-                                commandError
-                            );
-                        }
-                    }
-
-                } catch (error) {
-                    console.error(
-                        chalk.red(
-                            "Message handler error:"
-                        ),
-                        error
-                    );
-                }
-            }
-        );
-
-        // ----------------------------------------------------
-        // Deleted messages / anti-delete
-        // ----------------------------------------------------
-
-        sock.ev.on(
-            "messages.update",
-            async updates => {
-                if (!settings.antidelete) {
-                    return;
-                }
-
-                try {
-                    for (const update of updates) {
-                        const message =
-                            update.update?.message;
-
-                        if (message) {
-                            continue;
-                        }
-
-                        const key =
-                            update.key;
-
-                        if (!key?.id) {
-                            continue;
-                        }
-
-                        const original =
-                            messageStore.get(
-                                key.id
-                            );
-
-                        if (!original?.message) {
-                            continue;
-                        }
-
-                        const jid =
-                            key.remoteJid;
-
-                        if (!jid) {
-                            continue;
-                        }
-
-                        const sender =
-                            key.participant ||
-                            jid;
-
-                        try {
-                            await sock.sendMessage(
-                                jid,
-                                {
-                                    text:
-                                        `🛡️ *Anti-Delete*\n\nMessage deleted by @${sender.split("@")[0]}`,
-                                    mentions: [
-                                        sender
-                                    ]
-                                }
-                            );
-
-                            await sock.relayMessage(
-                                jid,
-                                original.message,
-                                {
-                                    messageId:
-                                        original.key
-                                            ?.id
-                                }
-                            );
-
-                        } catch (
-                            restoreError
-                        ) {
-                            console.error(
-                                chalk.red(
-                                    "Anti-delete restore error:"
-                                ),
-                                restoreError
-                            );
-                        }
-                    }
-                } catch (error) {
-                    console.error(
-                        chalk.red(
-                            "Anti-delete handler error:"
-                        ),
-                        error
-                    );
-                }
-            }
-        );
-
-        // ----------------------------------------------------
-        // Anti-call
-        // ----------------------------------------------------
-
-        sock.ev.on(
-            "call",
-            async calls => {
-                if (!settings.anticall) {
-                    return;
-                }
-
-                for (const call of calls) {
-                    try {
-                        if (
-                            call.status ===
-                            "offer"
-                        ) {
-                            await sock.rejectCall(
-                                call.id,
-                                call.from
-                            );
-
-                            console.log(
-                                chalk.yellow(
-                                    `📵 Rejected call from ${call.from}`
-                                )
-                            );
-                        }
-                    } catch (error) {
-                        console.error(
-                            chalk.red(
-                                "Anti-call error:"
-                            ),
-                            error
-                        );
-                    }
-                }
-            }
-        );
-
-        return sock;
-
-    } catch (error) {
-        globalSock = null;
-
-        setStatus({
-            connection: "error"
-        });
-
-        console.error(
-            chalk.red(
-                "❌ Failed to start Nexora:"
-            ),
-            error
-        );
-
-        if (!restarting) {
-            setTimeout(() => {
-                startBot().catch(
-                    restartError => {
-                        console.error(
-                            chalk.red(
-                                "Bot restart failed:"
-                            ),
-                            restartError
-                        );
-                    }
-                );
-            }, 5000);
-        }
+        return;
     }
+
+    scheduleReconnect(state);
 }
 
-// ============================================================
-// PROCESS SHUTDOWN
-// ============================================================
+function scheduleReconnect(state) {
+    if (state.stopping || state.reconnectTimer) return;
 
-async function gracefulShutdown(signal) {
-    if (restarting) return;
+    state.reconnectAttempts++;
+    const delay = Math.min(60_000, 5_000 * (2 ** Math.min(state.reconnectAttempts - 1, 3)));
 
-    restarting = true;
+    setSessionStatus(state, { connection: "reconnecting" });
+    console.log(chalk.yellow(`🔄 Session ${state.slot}: reconnecting in ${Math.round(delay / 1000)}s...`));
 
-    console.log(
-        chalk.yellow(
-            `\n${signal} received. Shutting down Nexora...`
-        )
-    );
+    state.reconnectTimer = setTimeout(async () => {
+        state.reconnectTimer = null;
+        if (state.stopping) return;
+        try {
+            await createSocket(state);
+        } catch (error) {
+            console.error(chalk.red(`Session ${state.slot} reconnect failed:`), error);
+            scheduleReconnect(state);
+        }
+    }, delay);
+}
+
+async function handleGroupParticipants(state, update) {
+    const { id, participants, action } = update;
+    if (!state.settings.welcome && !state.settings.goodbye) return;
 
     try {
-        if (globalSock) {
-            try {
-                globalSock.end(
-                    new Error(
-                        "Process shutting down"
-                    )
-                );
-            } catch {}
+        const metadata = await state.sock.groupMetadata(id);
+        for (const participant of participants) {
+            const number = participant.split("@")[0];
+            if (action === "add" && state.settings.welcome) {
+                await state.sock.sendMessage(id, {
+                    text: `👋 Welcome @${number} to *${metadata.subject}*!`,
+                    mentions: [participant]
+                });
+            }
+            if (action === "remove" && state.settings.goodbye) {
+                await state.sock.sendMessage(id, {
+                    text: `👋 Goodbye @${number}!`,
+                    mentions: [participant]
+                });
+            }
         }
-    } catch {}
-
-    setTimeout(() => {
-        process.exit(0);
-    }, 1000);
+    } catch (error) {
+        console.error(chalk.red(`Session ${state.slot} group event error:`), error);
+    }
 }
 
-process.on(
-    "SIGINT",
-    () => gracefulShutdown("SIGINT")
-);
+async function handleMessages(state, messages) {
+    const sock = state.sock;
+    if (!sock) return;
 
-process.on(
-    "SIGTERM",
-    () => gracefulShutdown("SIGTERM")
-);
+    for (const msg of messages) {
+        if (!msg?.message) continue;
 
-// Prevent unexpected errors from silently killing
-// the process without logging.
-process.on(
-    "uncaughtException",
-    error => {
-        console.error(
-            chalk.red(
-                "❌ Uncaught exception:"
-            ),
-            error
-        );
+        try {
+            if (state.settings.antidelete && msg.key?.id) {
+                storeMessage(state, msg);
+            }
+
+            if (state.settings.autostatus && msg.key?.remoteJid === "status@broadcast") {
+                try { await sock.readMessages([msg.key]); } catch {}
+            }
+
+            if (state.settings.antilink && msg.key?.remoteJid?.endsWith("@g.us")) {
+                await handleAntiLink(state, msg);
+            }
+
+            await handleCommand(sock, msg, {
+                startTime: process.uptime(),
+                settings: state.settings
+            });
+        } catch (error) {
+            console.error(chalk.red(`Session ${state.slot} message handler error:`), error);
+        }
     }
-);
+}
 
-process.on(
-    "unhandledRejection",
-    reason => {
-        console.error(
-            chalk.red(
-                "❌ Unhandled promise rejection:"
-            ),
-            reason
+async function handleAntiLink(state, msg) {
+    const sock = state.sock;
+    const text = getMessageText(msg);
+    if (!LINK_REGEX.test(text)) return;
+
+    const groupJid = msg.key.remoteJid;
+    const sender = msg.key.participant;
+    if (!sender) return;
+
+    try {
+        const metadata = await sock.groupMetadata(groupJid);
+        const senderParticipant = metadata.participants.find(p => p.id === sender);
+        const isSenderAdmin = Boolean(senderParticipant?.admin);
+        const botId = sock.user?.id;
+        const botNumber = botId?.split(":")[0]?.split("@")[0];
+        const isBotAdmin = metadata.participants.some(p =>
+            p.id === botId || p.id?.startsWith(`${botNumber}@`)
         );
+
+        if (isSenderAdmin || sender.split("@")[0] === OWNER_NUMBER || !isBotAdmin) return;
+
+        try { await sock.sendMessage(groupJid, { delete: msg.key }); } catch {}
+
+        const warningKey = `${groupJid}:${sender}`;
+        const current = (state.linkWarnings.get(warningKey) || 0) + 1;
+        state.linkWarnings.set(warningKey, current);
+
+        if (current >= MAX_LINK_WARNINGS) {
+            try {
+                await sock.groupParticipantsUpdate(groupJid, [sender], "remove");
+            } catch (error) {
+                console.error(chalk.red(`Session ${state.slot} anti-link removal error:`), error);
+            }
+            state.linkWarnings.delete(warningKey);
+        } else {
+            await sock.sendMessage(groupJid, {
+                text: `⚠️ @${sender.split("@")[0]} links are not allowed here.\n\nWarning ${current}/${MAX_LINK_WARNINGS}`,
+                mentions: [sender]
+            });
+        }
+    } catch (error) {
+        console.error(chalk.red(`Session ${state.slot} anti-link error:`), error);
     }
-);
+}
+
+async function handleDeletedMessages(state, updates) {
+    if (!state.settings.antidelete || !state.sock) return;
+
+    for (const update of updates) {
+        if (update.update?.message) continue;
+        const key = update.key;
+        const original = key?.id ? state.messageStore.get(key.id) : null;
+        if (!original?.message || !key?.remoteJid) continue;
+
+        try {
+            const sender = key.participant || key.remoteJid;
+            await state.sock.sendMessage(key.remoteJid, {
+                text: `🛡️ *Anti-Delete*\n\nMessage deleted by @${sender.split("@")[0]}`,
+                mentions: [sender]
+            });
+            await state.sock.relayMessage(key.remoteJid, original.message, {
+                messageId: original.key?.id
+            });
+        } catch (error) {
+            console.error(chalk.red(`Session ${state.slot} anti-delete error:`), error);
+        }
+    }
+}
+
+async function handleCalls(state, calls) {
+    if (!state.settings.anticall || !state.sock) return;
+
+    for (const call of calls) {
+        if (call.status !== "offer") continue;
+        try {
+            await state.sock.rejectCall(call.id, call.from);
+        } catch (error) {
+            console.error(chalk.red(`Session ${state.slot} anti-call error:`), error);
+        }
+    }
+}
+
+// ============================================================
+// START EXISTING SESSIONS
+// ============================================================
+
+async function loadExistingSessions() {
+    ensureSessionDirRoot();
+
+    for (const state of sessions.values()) {
+        if (!hasCredentials(state.slot)) continue;
+        try {
+            console.log(chalk.gray(`Loading existing session ${state.slot}...`));
+            await createSocket(state);
+        } catch (error) {
+            console.error(chalk.red(`Failed to load session ${state.slot}:`), error);
+            setSessionStatus(state, { connection: "error" });
+        }
+    }
+}
+
+function ensureSessionDirRoot() {
+    fs.mkdirSync(SESSION_ROOT, { recursive: true });
+}
+
+function showBanner() {
+    try {
+        console.log(chalk.cyan(figlet.textSync("NEXORA", { horizontalLayout: "default" })));
+    } catch {
+        console.log(chalk.cyan("=============================="));
+        console.log(chalk.cyan("          NEXORA"));
+        console.log(chalk.cyan("=============================="));
+    }
+    console.log(chalk.gray(`${BOT_NAME} • ${AUTHOR} • max ${MAX_SESSIONS} sessions`));
+    console.log(chalk.gray(`Session storage: ${SESSION_ROOT}`));
+}
+
+// ============================================================
+// SHUTDOWN
+// ============================================================
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    console.log(chalk.yellow(`\n${signal} received. Shutting down Nexora...`));
+
+    for (const state of sessions.values()) {
+        state.stopping = true;
+        if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+        if (state.sock) {
+            try { state.sock.end(new Error("Process shutting down")); } catch {}
+        }
+    }
+
+    setTimeout(() => process.exit(0), 1200);
+}
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("uncaughtException", error => console.error(chalk.red("❌ Uncaught exception:"), error));
+process.on("unhandledRejection", reason => console.error(chalk.red("❌ Unhandled rejection:"), reason));
 
 // ============================================================
 // START
 // ============================================================
 
-startBot().catch(error => {
-    console.error(
-        chalk.red(
-            "Fatal startup error:"
-        ),
-        error
-    );
+(async () => {
+    showBanner();
+    await loadExistingSessions();
+    console.log(chalk.green(`\n🚀 Nexora is ready. ${MAX_SESSIONS} session slots available.`));
+})().catch(error => {
+    console.error(chalk.red("Fatal startup error:"), error);
+    process.exit(1);
 });

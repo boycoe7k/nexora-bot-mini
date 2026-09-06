@@ -1,19 +1,31 @@
 services:
   - type: web
-    name: shadow-whatsapp-bot
+    name: nexora-bot-mini
     runtime: node
     plan: free
     buildCommand: npm install
-    startCommand: node index.js
+    startCommand: npm start
+    healthCheckPath: /health
     envVars:
       - key: OWNER_NUMBER
         sync: false
       - key: BOT_NAME
-        value: Shadow Bot
+        value: Nexora Bot Mini
+      - key: AUTHOR
+        value: Boycoe-dev
       - key: PREFIX
         value: .
+      - key: DASHBOARD_TOKEN
+        sync: false
+      - key: SESSION_ROOT
+        value: /tmp/nexora-sessions
+      - key: NEXA_VDL_API_KEY
+        sync: false
       - key: UNSPLASH_KEY
         sync: false
-      - key: GIPHY_KEY
+      - key: IMGBB_API_KEY
         sync: false
-    healthCheckPath: /
+      - key: REMOVEBG_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
